@@ -1,0 +1,52 @@
+Subject: [PATCH] component-macro: use manifest paths for component identities
+
+The component registry normalizes file!() paths to forward slashes. Metadata
+instead derives keys by treating a Cargo package ID URL as a filesystem path.
+On Windows, stripping path+file:// from file:///D:/... leaves /D:/..., which
+PathBuf::join treats as a rooted path without a drive prefix. The resulting
+key does not match the D:/... registry path and initialization fails with
+NotIncludeAllComponent. URL-escaped characters also remain undecoded.
+
+Use the parent of Cargo metadata's native manifest_path and normalize its
+separators to match the registry. This works for both Unix and Windows and
+requires no package ID URL parsing.
+
+The modified upstream file retains its MPL-2.0 license.
+
+---
+diff --git a/kernel/libs/comp-sys/component-macro/src/priority.rs b/kernel/libs/comp-sys/component-macro/src/priority.rs
+--- a/kernel/libs/comp-sys/component-macro/src/priority.rs
++++ b/kernel/libs/comp-sys/component-macro/src/priority.rs
+@@ -76,27 +76,15 @@
+     // priority calculation complete
+     let mut components_info = Vec::new();
+     for package in component_packages {
+-        let path = {
+-            // Parse the package ID <https://doc.rust-lang.org/cargo/reference/pkgid-spec.html>
+-            // and extract the path. Let's take `path+file:///path/to/comps/pci#aster-pci@0.1.0`
+-            // as an example package ID.
+-            let id = package["id"].as_str().unwrap();
+-            // Remove the prefix `path+file://`.
+-            assert!(id.starts_with("path+file://"));
+-            let id = id.trim_start_matches("path+file://");
+-            // Remove the fragment part `#aster-pci@0.1.0`. Note that the package name part
+-            // may be missing if the directory name is the same as the package name.
+-            id.split(['#', '@']).next().unwrap()
+-        };
++        // Cargo already provides a native filesystem path. Package IDs are
++        // URLs, whose drive prefixes and escaping are not filesystem syntax.
++        let manifest = PathBuf::from(package["manifest_path"].as_str().unwrap());
++        let path = manifest.parent().unwrap().to_str().unwrap().replace('\\', "/");
+         let component_info = {
+             let package_name = package["name"].as_str().unwrap().to_string();
+             ComponentInfo {
+                 name: package_name.clone(),
+-                path: PathBuf::from(&workspace_root)
+-                    .join(path)
+-                    .to_str()
+-                    .unwrap()
+-                    .to_string(),
++                path,
+                 priority: *mapping.get(&package_name).unwrap(),
+             }
+         };

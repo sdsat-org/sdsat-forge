@@ -1,0 +1,9 @@
+schema = 1
+name = "asterinas"
+backend = "asterinas"
+dependencies = ["linux-vdso"]
+source = "asterinas"
+patches = [
+    "packages/asterinas/patches/0001-short-vis-path-normalize-windows-paths.patch",
+    "packages/asterinas/patches/0002-component-macro-use-manifest-path.patch",
+]

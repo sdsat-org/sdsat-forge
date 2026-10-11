@@ -1,0 +1,5 @@
+schema = 1
+name = "linux-vdso"
+backend = "prebuilt"
+dependencies = []
+source = "linux-vdso"

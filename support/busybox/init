@@ -1,0 +1,35 @@
+#!/bin/sh
+# SPDX-License-Identifier: MPL-2.0
+# Adapted from the Asterinas Yuzuki Neko Buildroot init script.
+set -eu
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export HOME=/root TERM=vt100 SHELL=/bin/sh
+export PS1='forge:\w# '
+exec </dev/console >/dev/console 2>&1
+/bin/busybox --install -s /bin
+mount -t devtmpfs devtmpfs /dev
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+cd /root
+
+if [ "${1:-}" = --forge-test ]; then
+    /bin/sh /boot-check.sh
+    echo FORGE_BOOT_OK
+    /bin/busybox poweroff -f
+    echo 'Poweroff returned without stopping the system.' >&2
+    exit 1
+fi
+
+echo 'Asterinas / BusyBox'
+echo 'Type help for shell builtins, or busybox for available commands.'
+# BusyBox halt/poweroff/reboot signal PID 1 unless called with -f.
+trap 'exec /bin/busybox halt -f' USR1
+trap 'exec /bin/busybox poweroff -f' USR2
+trap 'exec /bin/busybox reboot -f' TERM
+while true; do
+    setsid -c /bin/sh -i </dev/ttyS0 >/dev/ttyS0 2>&1 &
+    # An asynchronous wait lets ash run the power-control traps.
+    wait "$!" || echo 'Shell exited with an error.' >&2
+    echo 'Shell exited; restarting.'
+done

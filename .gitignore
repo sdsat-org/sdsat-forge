@@ -1,0 +1,7 @@
+/target/
+/output/
+/dl/
+/.forge/
+/forge.toml
+/.config.toml
+*.log

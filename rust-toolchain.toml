@@ -1,0 +1,5 @@
+# Firmware and kernel share the toolchain pinned in their system profile.
+[toolchain]
+channel = "stable"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

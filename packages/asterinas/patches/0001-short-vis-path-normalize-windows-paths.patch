@@ -1,0 +1,32 @@
+Subject: [PATCH] short-vis-path: canonicalize the manifest source directory
+
+ExpandedPath canonicalizes the call-site source file before removing the
+manifest's src directory. On Windows, canonicalization introduces the
+verbatim path prefix, while CARGO_MANIFEST_DIR still has an ordinary drive
+path. Comparing these representations makes valid module paths fail the
+prefix check and causes the attribute macro to panic.
+
+Canonicalize both paths before comparing them. This also resolves symlinked
+manifest directories consistently with the call-site source path.
+
+The modified upstream file retains its MPL-2.0 license.
+
+---
+ kernel/libs/short-vis-path/src/args.rs | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/kernel/libs/short-vis-path/src/args.rs b/kernel/libs/short-vis-path/src/args.rs
+--- a/kernel/libs/short-vis-path/src/args.rs
++++ b/kernel/libs/short-vis-path/src/args.rs
+@@ -162,6 +162,11 @@ impl ExpandedPath {
+             let dir = std::env::var("CARGO_MANIFEST_DIR").expect("Failed to get manifest dir.");
+             std::path::PathBuf::from(dir).join("src")
+         };
++        // Both paths must use the same canonical representation, including
++        // Windows verbatim prefixes and any symlinked source directories.
++        let Ok(prefix) = prefix.canonicalize() else {
++            panic!("Unable to canonicalize {prefix:?}.")
++        };
+ 
+         // Strip `$CARGO_MANIFEST_DIR/src/`.
+         let Ok(module_path) = local_path.strip_prefix(&prefix) else {

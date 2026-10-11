@@ -1,0 +1,14 @@
+schema = 1
+arch = "riscv64"
+firmware_target = "riscv64gc-unknown-none-elf"
+kernel_target = "riscv64imac-unknown-none-elf"
+firmware_config = "boards/qemu/virt-riscv64/rustsbi.toml"
+
+[qemu]
+program = "qemu-system-riscv64"
+machine = "virt"
+cpu = "rv64,svpbmt=true,zkr=true"
+memory = "1G"
+smp = 1
+# Asterinas log level: warn keeps warnings and errors; info includes every syscall.
+append = "loglevel=warn console=ttyS0 rdinit=/bin/sh SHELL=/bin/sh LOGNAME=root HOME=/root USER=root PATH=/bin -- /init"

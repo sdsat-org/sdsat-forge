@@ -1,0 +1,29 @@
+# Source versions change only through an explicit lock update.
+schema = 1
+
+[sources.rustsbi]
+version = "c11e9d2c7850cc9672329e8a4f372214bd31d090"
+url = "https://codeload.github.com/rustsbi/rustsbi/tar.gz/c11e9d2c7850cc9672329e8a4f372214bd31d090"
+sha256 = "85320b8bf4e7e6ef1455c7a8c865f8e596df83b6c189bae81f185678846ddbac"
+
+[sources.asterinas]
+version = "af0b77c8f11db24ba59b8d2cf29a189281b8e270"
+url = "https://codeload.github.com/asterinas/asterinas/tar.gz/af0b77c8f11db24ba59b8d2cf29a189281b8e270"
+sha256 = "08acde6997a123eadd45a283d9eb57ab3a21af482b5ba684963d75d300cef66f"
+
+# Asterinas's prebuilt compatibility library; this does not build a Linux kernel.
+[sources.linux-vdso]
+version = "8af571775a3d3a1df3e84fc9709b9d6b160c771a"
+url = "https://codeload.github.com/asterinas/linux_vdso/tar.gz/8af571775a3d3a1df3e84fc9709b9d6b160c771a"
+sha256 = "ce018ab2f2ea84859e6a1e1f099abf093cb46e4250a4806b85aeaa8949017fcf"
+
+[sources.busybox]
+version = "1.38.0"
+url = "https://busybox.net/downloads/busybox-1.38.0.tar.bz2"
+sha256 = "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2"
+
+# Linux x86_64 host; RISC-V 64 LP64D target, GCC 13.3.0 / musl 1.2.5.
+[sources.bootlin-riscv64-musl]
+version = "2024.05-1"
+url = "https://toolchains.bootlin.com/downloads/releases/toolchains/riscv64-lp64d/tarballs/riscv64-lp64d--musl--stable-2024.05-1.tar.xz"
+sha256 = "481c9353467f42d02edf9080954b3c14a75ff7c19ed9e8fbf9cfa67d028587d3"
