@@ -43,7 +43,7 @@ enum Action {
     Build { package: Option<String> },
     /// Reinvoke the selected package backend and refresh its exported artifact.
     Rebuild { package: String },
-    /// Boot the generated system image (BusyBox opens an interactive shell).
+    /// Boot the generated system image.
     Run {
         #[arg(long)]
         qemu: Option<String>,
@@ -183,7 +183,7 @@ fn doctor(build: &Build) -> Result<()> {
             missing.push(toolchain.clone());
         }
     }
-    sdsat_forge::backend::busybox::check_host()?;
+    build.check_host()?;
     build.plan()?;
     if !missing.is_empty() {
         bail!("missing requirements: {}", missing.join(", "));
@@ -192,10 +192,7 @@ fn doctor(build: &Build) -> Result<()> {
 }
 
 fn setup(build: &Build) -> Result<()> {
-    let targets = format!(
-        "{},{}",
-        build.board.firmware_target, build.board.kernel_target
-    );
+    let targets = build.rust_targets().join(",");
     process::run(
         "rustup",
         [

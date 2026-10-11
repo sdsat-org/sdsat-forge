@@ -25,6 +25,8 @@ just run
 
 运行 `just test-boot` 可自动验证系统启动，`just help` 查看完整帮助。
 
+需要 Linux 构建环境的组件可使用本机或 SSH 构建机。远程构建时，将 `FORGE_BUILD_SSH` 设置为 SSH 主机别名，使用 `just doctor` 检查依赖。
+
 ## 命令列表
 
 ### 基础使用

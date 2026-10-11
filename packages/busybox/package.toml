@@ -4,4 +4,4 @@ backend = "busybox"
 source = "busybox"
 config = "packages/busybox/defconfig"
 toolchain = "bootlin-riscv64-musl"
-
+artifact = "busybox.elf"

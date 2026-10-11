@@ -3,3 +3,5 @@ name = "linux-vdso"
 backend = "prebuilt"
 dependencies = []
 source = "linux-vdso"
+artifact = "vdso_riscv64.so"
+file = "vdso_riscv64.so"

@@ -21,7 +21,7 @@ if [ "${1:-}" = --forge-test ]; then
     exit 1
 fi
 
-echo 'Asterinas / BusyBox'
+printf '%s / BusyBox\n' "$(uname -s)"
 echo 'Type help for shell builtins, or busybox for available commands.'
 # BusyBox halt/poweroff/reboot signal PID 1 unless called with -f.
 trap 'exec /bin/busybox halt -f' USR1

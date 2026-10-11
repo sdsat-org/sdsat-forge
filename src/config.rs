@@ -48,7 +48,6 @@ pub struct Board {
     pub schema: u32,
     pub arch: String,
     pub firmware_target: String,
-    pub kernel_target: String,
     pub firmware_config: String,
     pub qemu: QemuConfig,
 }
@@ -61,7 +60,6 @@ pub struct QemuConfig {
     pub cpu: String,
     pub memory: String,
     pub smp: u32,
-    pub append: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +69,9 @@ pub struct Recipe {
     pub name: String,
     pub backend: String,
     pub source: String,
+    pub artifact: String,
+    pub file: Option<String>,
+    pub target: Option<String>,
     pub config: Option<String>,
     pub toolchain: Option<String>,
     #[serde(default)]
@@ -84,7 +85,42 @@ pub struct Recipe {
 pub struct Profile {
     pub schema: u32,
     pub toolchain: String,
-    pub init: String,
+    pub firmware: String,
+    pub kernel: String,
+    pub rootfs: Rootfs,
+    pub boot: BootConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum Rootfs {
+    Busybox {
+        package: String,
+        init: String,
+    },
+    Prebuilt {
+        package: String,
+        #[serde(default)]
+        scripts: BTreeMap<String, String>,
+    },
+}
+
+impl Rootfs {
+    pub fn package(&self) -> &str {
+        match self {
+            Self::Busybox { package, .. } | Self::Prebuilt { package, .. } => package,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootConfig {
+    pub append: String,
+    pub test_append: String,
+    pub cpu: Option<String>,
+    pub memory: Option<String>,
+    pub smp: Option<u32>,
 }
 
 pub fn read<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
@@ -101,6 +137,18 @@ pub fn validate_name(name: &str) -> Result<()> {
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
         "invalid name {name:?}; use letters, digits, '_' or '-'"
+    );
+    Ok(())
+}
+
+pub fn validate_filename(name: &str) -> Result<()> {
+    ensure!(
+        !name.is_empty()
+            && !name.starts_with('.')
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)),
+        "invalid artifact filename {name:?}"
     );
     Ok(())
 }
@@ -169,10 +217,19 @@ pub fn recipes(root: &Path, preset: &Preset) -> Result<BTreeMap<String, Recipe>>
             "invalid recipe schema/name for {name}"
         );
         ensure!(
-            ["rustsbi", "asterinas", "prebuilt", "busybox"].contains(&recipe.backend.as_str()),
+            ["rustsbi", "asterinas", "prebuilt", "busybox", "linux"]
+                .contains(&recipe.backend.as_str()),
             "unsupported backend {}",
             recipe.backend
         );
+        ensure!(
+            recipe.backend != "prebuilt" || recipe.file.is_some() || recipe.patches.is_empty(),
+            "raw prebuilt package {name} cannot apply source patches"
+        );
+        validate_filename(&recipe.artifact)?;
+        if let Some(file) = &recipe.file {
+            validate_filename(file)?;
+        }
         pending.extend(recipe.dependencies.clone());
         result.insert(name, recipe);
     }

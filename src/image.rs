@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, ensure};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -58,6 +58,35 @@ pub fn create_initramfs(busybox: &Path, init: &Path, check: &Path, output: &Path
         fs::create_dir_all(parent)?;
     }
     fs::write(output, archive).with_context(|| format!("write {}", output.display()))
+}
+
+/// Linux accepts concatenated compressed and uncompressed newc archives.
+/// Append executable support scripts without unpacking a vendor rootfs on the host.
+pub fn append_scripts(output: &Path, scripts: &[(&str, PathBuf)]) -> Result<()> {
+    if scripts.is_empty() {
+        return Ok(());
+    }
+    let mut archive = Vec::new();
+    for (index, (name, path)) in scripts.iter().enumerate() {
+        crate::config::validate_filename(name)?;
+        let script = fs::read_to_string(path)?.replace("\r\n", "\n");
+        append_entry(
+            &mut archive,
+            index as u32 + 1,
+            name,
+            0o100755,
+            (0, 0),
+            script.as_bytes(),
+        )?;
+    }
+    append_entry(&mut archive, 0, "TRAILER!!!", 0, (0, 0), &[])?;
+    pad(&mut archive, 512);
+    let mut file = fs::OpenOptions::new().append(true).open(output)?;
+    // Each uncompressed newc member starts at a four-byte boundary.
+    let padding = (4 - file.metadata()?.len() % 4) % 4;
+    file.write_all(&[0; 3][..padding as usize])?;
+    file.write_all(&archive)?;
+    Ok(())
 }
 
 fn append_entry(
@@ -130,10 +159,6 @@ pub fn run_qemu(
         fs::create_dir_all(parent)?;
     }
     let log_file = Arc::new(Mutex::new(File::create(log)?));
-    let mut append = options.append.clone();
-    if timeout.is_some() {
-        append.push_str(" --forge-test");
-    }
     let mut child = Command::new(&options.program)
         .args([
             "-machine",
@@ -151,7 +176,7 @@ pub fn run_qemu(
         .arg(kernel)
         .arg("-initrd")
         .arg(initramfs)
-        .args(["-append", &append, "-nographic", "-no-reboot"])
+        .args(["-append", &options.append, "-nographic", "-no-reboot"])
         .stdin(if timeout.is_some() {
             Stdio::null()
         } else {

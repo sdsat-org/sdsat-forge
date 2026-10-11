@@ -3,3 +3,4 @@ name = "rustsbi"
 backend = "rustsbi"
 dependencies = []
 source = "rustsbi"
+artifact = "rustsbi.elf"

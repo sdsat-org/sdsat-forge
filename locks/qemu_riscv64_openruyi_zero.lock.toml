@@ -1,0 +1,22 @@
+# Source versions change only through an explicit lock update.
+schema = 1
+
+[sources.rustsbi]
+version = "c11e9d2c7850cc9672329e8a4f372214bd31d090"
+url = "https://codeload.github.com/rustsbi/rustsbi/tar.gz/c11e9d2c7850cc9672329e8a4f372214bd31d090"
+sha256 = "85320b8bf4e7e6ef1455c7a8c865f8e596df83b6c189bae81f185678846ddbac"
+
+[sources.linux]
+version = "6.18.56"
+url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.56.tar.xz"
+sha256 = "4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89"
+
+[sources.openruyi-zero]
+version = "2026.09"
+url = "https://releases.openruyi.cn/creek/2026.09/rva23/openRuyi-2026.09-zero.cpio.gz"
+sha256 = "4199af4d5b2169814c8188adc0c9cf8552638ff76c3e46391f55ee3a6291404d"
+
+[sources.bootlin-riscv64-musl]
+version = "2024.05-1"
+url = "https://toolchains.bootlin.com/downloads/releases/toolchains/riscv64-lp64d/tarballs/riscv64-lp64d--musl--stable-2024.05-1.tar.xz"
+sha256 = "481c9353467f42d02edf9080954b3c14a75ff7c19ed9e8fbf9cfa67d028587d3"

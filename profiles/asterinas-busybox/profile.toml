@@ -1,3 +1,14 @@
 schema = 1
 toolchain = "nightly-2026-07-21"
+firmware = "rustsbi"
+kernel = "asterinas"
+
+[rootfs]
+kind = "busybox"
+package = "busybox"
 init = "support/busybox"
+
+[boot]
+# Asterinas logs every syscall at info level.
+append = "loglevel=warn console=ttyS0 rdinit=/bin/sh SHELL=/bin/sh LOGNAME=root HOME=/root USER=root PATH=/bin -- /init"
+test_append = "--forge-test"

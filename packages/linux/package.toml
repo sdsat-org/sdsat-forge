@@ -1,0 +1,7 @@
+schema = 1
+name = "linux"
+backend = "linux"
+source = "linux"
+config = "packages/linux/defconfig"
+toolchain = "bootlin-riscv64-musl"
+artifact = "Image"

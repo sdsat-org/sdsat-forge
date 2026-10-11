@@ -11,7 +11,6 @@ use std::{
     process::{Command, Stdio},
 };
 
-const TARGET: &str = "riscv64imac-unknown-none-elf";
 const BINARY: &str = "asterinas-osdk-bin";
 const RUSTFLAGS: &[&str] = &[
     "-Clink-arg=-Triscv64.ld",
@@ -23,7 +22,17 @@ const RUSTFLAGS: &[&str] = &[
     "-Ctarget-feature=+zicbom",
 ];
 
-pub fn build(source: &Path, vdso: &Path, out: &Path, toolchain: &str) -> Result<PathBuf> {
+pub fn build(
+    source: &Path,
+    vdso: &Path,
+    out: &Path,
+    toolchain: &str,
+    target: &str,
+) -> Result<PathBuf> {
+    ensure!(
+        target == "riscv64imac-unknown-none-elf",
+        "unsupported Asterinas target {target}"
+    );
     let source = config::absolute(source)?;
     let vdso = config::absolute(vdso)?;
     ensure!(
@@ -42,7 +51,7 @@ pub fn build(source: &Path, vdso: &Path, out: &Path, toolchain: &str) -> Result<
             "metadata",
             "--format-version=1",
             "--filter-platform",
-            TARGET,
+            target,
         ])
         .stdout(Stdio::null())
         .status()
@@ -58,7 +67,7 @@ pub fn build(source: &Path, vdso: &Path, out: &Path, toolchain: &str) -> Result<
 
     let mut command = cargo(toolchain, &wrapper);
     command
-        .args(["build", "--locked", "--release", "--target", TARGET])
+        .args(["build", "--locked", "--release", "--target", target])
         .arg("--target-dir")
         .arg(out.join("target"))
         .args([
@@ -73,7 +82,7 @@ pub fn build(source: &Path, vdso: &Path, out: &Path, toolchain: &str) -> Result<
         .env("OSDK_BUILD_RUSTC", toolchain)
         .env("ASTER_BUILD_TIMESTAMP", "1970-01-01T00:00:00Z");
     process::logged(&mut command, &out.join("build.log"))?;
-    let elf = out.join("target").join(TARGET).join("release").join(BINARY);
+    let elf = out.join("target").join(target).join("release").join(BINARY);
     ensure!(elf.is_file(), "Asterinas ELF missing: {}", elf.display());
     Ok(elf)
 }

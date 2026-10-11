@@ -1,0 +1,6 @@
+schema = 1
+name = "qemu_riscv64_openruyi_zero"
+board = "qemu/virt-riscv64"
+profile = "linux-openruyi-zero"
+packages = ["rustsbi", "linux", "openruyi-zero"]
+lock = "locks/qemu_riscv64_openruyi_zero.lock.toml"

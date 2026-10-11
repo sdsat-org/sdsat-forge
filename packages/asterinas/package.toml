@@ -7,3 +7,5 @@ patches = [
     "packages/asterinas/patches/0001-short-vis-path-normalize-windows-paths.patch",
     "packages/asterinas/patches/0002-component-macro-use-manifest-path.patch",
 ]
+artifact = "asterinas.elf"
+target = "riscv64imac-unknown-none-elf"
