@@ -86,6 +86,7 @@ pub struct Profile {
     pub schema: u32,
     pub toolchain: String,
     pub firmware: String,
+    pub bootloader: Option<String>,
     pub kernel: String,
     pub rootfs: Rootfs,
     pub boot: BootConfig,
@@ -217,8 +218,7 @@ pub fn recipes(root: &Path, preset: &Preset) -> Result<BTreeMap<String, Recipe>>
             "invalid recipe schema/name for {name}"
         );
         ensure!(
-            ["rustsbi", "asterinas", "prebuilt", "busybox", "linux"]
-                .contains(&recipe.backend.as_str()),
+            crate::backend::BACKENDS.contains(&recipe.backend.as_str()),
             "unsupported backend {}",
             recipe.backend
         );

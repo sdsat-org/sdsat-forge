@@ -1,6 +1,7 @@
 schema = 1
 toolchain = "nightly-2026-07-21"
 firmware = "rustsbi"
+bootloader = "uboot"
 kernel = "linux"
 
 [rootfs]

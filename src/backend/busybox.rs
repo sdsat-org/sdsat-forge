@@ -1,8 +1,6 @@
 use super::builder::{Config, Kbuild};
-use anyhow::Result;
-use std::path::{Path, PathBuf};
 
-const PACKAGE: Kbuild = Kbuild {
+pub(super) const PACKAGE: Kbuild = Kbuild {
     name: "BusyBox",
     tools: &[],
     config: Config::Defconfig,
@@ -12,11 +10,3 @@ const PACKAGE: Kbuild = Kbuild {
     ],
     artifact: "busybox",
 };
-
-pub fn check_host() -> Result<()> {
-    PACKAGE.check_host()
-}
-
-pub fn build(source: &Path, toolchain: &Path, config: &Path, out: &Path) -> Result<PathBuf> {
-    PACKAGE.build(source, toolchain, config, out)
-}

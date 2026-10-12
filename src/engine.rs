@@ -153,7 +153,7 @@ impl Build {
                     "unlocked toolchain {toolchain}"
                 );
             }
-            if matches!(recipe.backend.as_str(), "busybox" | "linux") {
+            if crate::backend::kbuild(&recipe.backend).is_some() {
                 ensure!(
                     recipe.config.is_some() && recipe.toolchain.is_some(),
                     "{} needs a config and toolchain source",
@@ -177,10 +177,27 @@ impl Build {
                 "file is only supported for prebuilt packages"
             );
         }
-        for name in [&profile.firmware, &profile.kernel, profile.rootfs.package()] {
+        for name in [
+            profile.firmware.as_str(),
+            profile.kernel.as_str(),
+            profile.rootfs.package(),
+        ]
+        .into_iter()
+        .chain(profile.bootloader.as_deref())
+        {
             ensure!(
                 recipes.contains_key(name),
                 "profile refers to missing package {name}"
+            );
+        }
+        if let Some(name) = &profile.bootloader {
+            ensure!(
+                recipes[name].backend == "uboot",
+                "bootloader needs a U-Boot package"
+            );
+            ensure!(
+                recipes[&profile.kernel].backend == "linux",
+                "U-Boot boot currently needs a Linux Image"
             );
         }
         ensure!(
@@ -267,12 +284,11 @@ impl Build {
                 self.sources.sources[&recipe.source].version, recipe.backend
             );
         }
-        println!(
-            "  {} -> {} -> {} -> QEMU",
-            self.profile.firmware,
-            self.profile.kernel,
-            self.profile.rootfs.package()
-        );
+        let stages = std::iter::once(self.profile.firmware.as_str())
+            .chain(self.profile.bootloader.as_deref())
+            .chain([self.profile.kernel.as_str(), self.profile.rootfs.package()])
+            .collect::<Vec<_>>();
+        println!("  QEMU: {}", stages.join(" -> "));
         Ok(())
     }
 
@@ -285,10 +301,15 @@ impl Build {
     }
 
     pub fn check_host(&self) -> Result<()> {
-        if self.recipes.values().any(|r| r.backend == "linux") {
-            crate::backend::linux::check_host()?;
-        } else if self.recipes.values().any(|r| r.backend == "busybox") {
-            crate::backend::busybox::check_host()?;
+        let backends = self
+            .recipes
+            .values()
+            .map(|recipe| recipe.backend.as_str())
+            .collect::<BTreeSet<_>>();
+        for name in backends {
+            if let Some(backend) = crate::backend::kbuild(name) {
+                backend.check_host()?;
+            }
         }
         Ok(())
     }
@@ -299,12 +320,16 @@ impl Build {
             .join(&self.recipes[name].artifact)
     }
 
-    fn system_artifacts(&self) -> [&str; 3] {
-        [
-            &self.recipes[&self.profile.firmware].artifact,
-            &self.recipes[&self.profile.kernel].artifact,
+    fn system_artifacts(&self) -> Vec<&str> {
+        let mut artifacts = vec![
+            self.recipes[&self.profile.firmware].artifact.as_str(),
+            self.recipes[&self.profile.kernel].artifact.as_str(),
             "initramfs.cpio",
-        ]
+        ];
+        if let Some(name) = &self.profile.bootloader {
+            artifacts.push(&self.recipes[name].artifact);
+        }
+        artifacts
     }
 
     pub fn fetch_all(&self) -> Result<()> {
@@ -388,10 +413,12 @@ impl Build {
             "asterinas" => data.extend_from_slice(include_bytes!("backend/asterinas.rs")),
             "busybox" => data.extend_from_slice(include_bytes!("backend/busybox.rs")),
             "linux" => data.extend_from_slice(include_bytes!("backend/linux.rs")),
+            "uboot" => data.extend_from_slice(include_bytes!("backend/uboot.rs")),
             _ => (),
         }
-        if matches!(recipe.backend.as_str(), "busybox" | "linux") {
+        if crate::backend::kbuild(&recipe.backend).is_some() {
             data.extend_from_slice(include_bytes!("backend/builder.rs"));
+            data.extend_from_slice(include_bytes!("backend/mod.rs"));
         }
         if let Some(path) = &recipe.config {
             data.extend(fs::read(config::input_path(&self.root, path)?)?);
@@ -436,7 +463,7 @@ impl Build {
         }
         for name in order {
             let recipe = &self.recipes[&name];
-            let source = if matches!(recipe.backend.as_str(), "busybox" | "linux")
+            let source = if crate::backend::kbuild(&recipe.backend).is_some()
                 || (recipe.backend == "prebuilt" && recipe.file.is_none())
             {
                 source::fetch(&self.sources.sources[&recipe.source], &self.root.join("dl"))?
@@ -460,16 +487,8 @@ impl Build {
             if recipe.backend != "prebuilt" {
                 safe_directory(&self.root, &work)?;
             }
-            let built = match recipe.backend.as_str() {
-                "asterinas" => crate::backend::asterinas::build(
-                    &source,
-                    &self.output.join("images"),
-                    &work,
-                    &self.profile.toolchain,
-                    recipe.target.as_deref().unwrap(),
-                )?,
-                "rustsbi" => self.firmware(&source, &work)?,
-                "busybox" => crate::backend::busybox::build(
+            let built = if let Some(backend) = crate::backend::kbuild(&recipe.backend) {
+                backend.build(
                     &source,
                     &source::fetch(
                         &self.sources.sources[recipe.toolchain.as_ref().unwrap()],
@@ -477,21 +496,23 @@ impl Build {
                     )?,
                     &config::input_path(&self.root, recipe.config.as_deref().unwrap())?,
                     &work,
-                )?,
-                "linux" => crate::backend::linux::build(
-                    &source,
-                    &source::fetch(
-                        &self.sources.sources[recipe.toolchain.as_ref().unwrap()],
-                        &self.root.join("dl"),
+                )?
+            } else {
+                match recipe.backend.as_str() {
+                    "asterinas" => crate::backend::asterinas::build(
+                        &source,
+                        &self.output.join("images"),
+                        &work,
+                        &self.profile.toolchain,
+                        recipe.target.as_deref().unwrap(),
                     )?,
-                    &config::input_path(&self.root, recipe.config.as_deref().unwrap())?,
-                    &work,
-                )?,
-                "prebuilt" => recipe
-                    .file
-                    .as_ref()
-                    .map_or_else(|| source.clone(), |file| source.join(file)),
-                _ => unreachable!("validated backend"),
+                    "rustsbi" => self.firmware(&source, &work)?,
+                    "prebuilt" => recipe
+                        .file
+                        .as_ref()
+                        .map_or_else(|| source.clone(), |file| source.join(file)),
+                    _ => unreachable!("validated backend"),
+                }
             };
             if built != artifact {
                 publish(&artifact, &fs::read(built)?)?;
@@ -661,6 +682,11 @@ impl Build {
         image::run_qemu(
             &options,
             &self.artifact(&self.profile.firmware),
+            self.profile
+                .bootloader
+                .as_ref()
+                .map(|name| self.artifact(name))
+                .as_deref(),
             &self.artifact(&self.profile.kernel),
             &self.output.join("images/initramfs.cpio"),
             &self.output.join("logs/qemu.log"),

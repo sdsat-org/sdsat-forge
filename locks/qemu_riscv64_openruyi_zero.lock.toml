@@ -11,6 +11,11 @@ version = "6.18.56"
 url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.56.tar.xz"
 sha256 = "4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89"
 
+[sources.uboot]
+version = "2026.10"
+url = "https://codeload.github.com/u-boot/u-boot/tar.gz/refs/tags/v2026.10"
+sha256 = "f943a88389c8fd70a6b0d061a88267465e143c7ca6ea2b75837ab20f5b60c739"
+
 [sources.openruyi-zero]
 version = "2026.09"
 url = "https://releases.openruyi.cn/creek/2026.09/rva23/openRuyi-2026.09-zero.cpio.gz"

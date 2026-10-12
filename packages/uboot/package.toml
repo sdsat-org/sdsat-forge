@@ -1,0 +1,7 @@
+schema = 1
+name = "uboot"
+backend = "uboot"
+source = "uboot"
+config = "boards/qemu/virt-riscv64/uboot.defconfig"
+toolchain = "bootlin-riscv64-musl"
+artifact = "u-boot.bin"

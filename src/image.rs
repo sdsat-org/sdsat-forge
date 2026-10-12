@@ -146,20 +146,26 @@ pub struct QemuOptions {
 pub fn run_qemu(
     options: &QemuOptions,
     firmware: &Path,
+    bootloader: Option<&Path>,
     kernel: &Path,
     initramfs: &Path,
     log: &Path,
     timeout: Option<Duration>,
 ) -> Result<()> {
     ensure!(options.smp > 0, "QEMU requires at least one CPU");
-    for path in [firmware, kernel, initramfs] {
+    for path in [firmware, kernel, initramfs].into_iter().chain(bootloader) {
         ensure!(path.is_file(), "missing QEMU input: {}", path.display());
     }
     if let Some(parent) = log.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
     let log_file = Arc::new(Mutex::new(File::create(log)?));
-    let mut child = Command::new(&options.program)
+    // Keep the read-only boot volume alive until QEMU and its log readers exit.
+    let boot_files = bootloader
+        .map(|_| boot_directory(kernel, initramfs, &options.append))
+        .transpose()?;
+    let mut command = Command::new(&options.program);
+    command
         .args([
             "-machine",
             &options.machine,
@@ -171,12 +177,34 @@ pub fn run_qemu(
             &options.smp.to_string(),
         ])
         .arg("-bios")
-        .arg(firmware)
-        .arg("-kernel")
-        .arg(kernel)
-        .arg("-initrd")
-        .arg(initramfs)
-        .args(["-append", &options.append, "-nographic", "-no-reboot"])
+        .arg(firmware);
+    if let Some(bootloader) = bootloader {
+        // QEMU supplies the board DTB; U-Boot loads the OS from a VirtIO FAT disk.
+        // JSON preserves host paths, including Windows drive letters and commas.
+        let disk = serde_json::json!({
+            "driver": "vvfat",
+            "node-name": "forge-boot",
+            "dir": boot_files.as_ref().unwrap().path(),
+            "fat-type": 16,
+            "read-only": true,
+            "rw": false,
+        });
+        command
+            .arg("-kernel")
+            .arg(bootloader)
+            .arg("-blockdev")
+            .arg(serde_json::to_string(&disk)?)
+            .args(["-device", "virtio-blk-device,drive=forge-boot"]);
+    } else {
+        command
+            .arg("-kernel")
+            .arg(kernel)
+            .arg("-initrd")
+            .arg(initramfs)
+            .args(["-append", &options.append]);
+    }
+    let mut child = command
+        .args(["-nographic", "-no-reboot"])
         .stdin(if timeout.is_some() {
             Stdio::null()
         } else {
@@ -214,6 +242,28 @@ pub fn run_qemu(
         log.display()
     );
     Ok(())
+}
+
+/// Stage an extlinux boot volume without host filesystem tools or symlinks.
+fn boot_directory(kernel: &Path, initramfs: &Path, append: &str) -> Result<tempfile::TempDir> {
+    ensure!(
+        !append.contains(['\n', '\r']),
+        "boot arguments must fit on one line"
+    );
+    let directory = tempfile::Builder::new()
+        .prefix(".uboot-")
+        .tempdir_in(kernel.parent().context("kernel needs a parent directory")?)?;
+    let root = directory.path();
+    fs::copy(kernel, root.join("Image"))?;
+    fs::copy(initramfs, root.join("initramfs.cpio"))?;
+    fs::create_dir(root.join("extlinux"))?;
+    fs::write(
+        root.join("extlinux/extlinux.conf"),
+        format!(
+            "default forge\ntimeout 0\nlabel forge\n  linux /Image\n  initrd /initramfs.cpio\n  append {append}\n"
+        ),
+    )?;
+    Ok(directory)
 }
 
 fn wait_for_exit(child: &mut Child, timeout: Option<Duration>) -> Result<ExitStatus> {
