@@ -1,7 +1,18 @@
 schema = 1
 name = "linux"
-backend = "linux"
+backend = "kbuild"
 source = "linux"
 config = "packages/linux/defconfig"
 toolchain = "bootlin-riscv64-musl"
 artifact = "Image"
+build_output = "arch/riscv/boot/Image"
+args = ["Image"]
+
+[kbuild]
+tools = ["gcc", "xz", "bzip2", "bash", "flex", "bison", "bc", "perl"]
+config = "olddefconfig"
+arch = "riscv"
+compiler_pattern = "riscv64*-gcc"
+compiler_suffix = "gcc"
+host_os = "Linux"
+host_arch = "x86_64"

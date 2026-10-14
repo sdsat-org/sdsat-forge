@@ -6,8 +6,6 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-pub const DEFAULT_CONFIG: &str = "qemu_riscv64_asterinas";
-
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
@@ -47,9 +45,54 @@ pub struct Preset {
 pub struct Board {
     pub schema: u32,
     pub arch: String,
-    pub firmware_target: String,
-    pub firmware_config: String,
-    pub qemu: QemuConfig,
+    #[serde(default)]
+    pub packages: BTreeMap<String, PackageOverride>,
+    #[serde(default)]
+    pub rootfs_files: BTreeMap<String, RootfsFile>,
+    pub qemu: Option<QemuConfig>,
+    pub sdcard: Option<SdCard>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackageOverride {
+    pub config: Option<String>,
+    pub artifact: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub artifacts: Option<BTreeMap<String, String>>,
+    pub in_tree: Option<bool>,
+    pub target: Option<String>,
+    pub build_output: Option<String>,
+    pub kbuild: Option<crate::backend::kbuild::KbuildConfig>,
+    pub cargo: Option<crate::backend::cargo::CargoConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum RootfsFile {
+    Package(String),
+    Artifact { package: String, artifact: String },
+}
+
+impl RootfsFile {
+    pub fn package(&self) -> &str {
+        match self {
+            Self::Package(package) | Self::Artifact { package, .. } => package,
+        }
+    }
+
+    pub fn artifact<'a>(&'a self, recipe: &'a Recipe) -> &'a str {
+        match self {
+            Self::Package(_) => &recipe.artifact,
+            Self::Artifact { artifact, .. } => artifact,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SdCard {
+    pub dtb: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +113,28 @@ pub struct Recipe {
     pub backend: String,
     pub source: String,
     pub artifact: String,
+    pub build_output: Option<String>,
+    pub kbuild: Option<crate::backend::kbuild::KbuildConfig>,
+    pub cargo: Option<crate::backend::cargo::CargoConfig>,
+    #[serde(default = "default_extract")]
+    pub extract: bool,
+    #[serde(default)]
+    pub extra_sources: BTreeMap<String, String>,
+    /// Additional repository inputs read by the build, included in cache keys.
+    #[serde(default)]
+    pub inputs: Vec<String>,
+    #[serde(default)]
+    pub host_tools: Vec<String>,
+    #[serde(default)]
+    pub rust_components: Vec<String>,
+    #[serde(default)]
+    pub cargo_tools: Vec<CargoTool>,
+    #[serde(default)]
+    pub in_tree: bool,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub artifacts: BTreeMap<String, String>,
     pub file: Option<String>,
     pub target: Option<String>,
     pub config: Option<String>,
@@ -78,6 +143,18 @@ pub struct Recipe {
     pub dependencies: Vec<String>,
     #[serde(default)]
     pub patches: Vec<String>,
+}
+
+fn default_extract() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
+pub struct CargoTool {
+    pub name: String,
+    pub version: String,
+    pub toolchain: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,7 +281,7 @@ pub fn validate_preset(root: &Path, preset: &Preset) -> Result<()> {
     Ok(())
 }
 
-pub fn recipes(root: &Path, preset: &Preset) -> Result<BTreeMap<String, Recipe>> {
+pub fn recipes(root: &Path, preset: &Preset, board: &Board) -> Result<BTreeMap<String, Recipe>> {
     let mut pending = preset.packages.clone();
     let mut result = BTreeMap::new();
     while let Some(name) = pending.pop() {
@@ -212,7 +289,37 @@ pub fn recipes(root: &Path, preset: &Preset) -> Result<BTreeMap<String, Recipe>>
             continue;
         }
         validate_name(&name)?;
-        let recipe: Recipe = read(&input_path(root, &format!("packages/{name}/package.toml"))?)?;
+        let mut recipe: Recipe =
+            read(&input_path(root, &format!("packages/{name}/package.toml"))?)?;
+        if let Some(package) = board.packages.get(&name) {
+            if let Some(config) = &package.config {
+                recipe.config = Some(config.clone());
+            }
+            if let Some(artifact) = &package.artifact {
+                recipe.artifact.clone_from(artifact);
+            }
+            if let Some(args) = &package.args {
+                recipe.args.clone_from(args);
+            }
+            if let Some(artifacts) = &package.artifacts {
+                recipe.artifacts.clone_from(artifacts);
+            }
+            if let Some(in_tree) = package.in_tree {
+                recipe.in_tree = in_tree;
+            }
+            if let Some(target) = &package.target {
+                recipe.target = Some(target.clone());
+            }
+            if let Some(output) = &package.build_output {
+                recipe.build_output = Some(output.clone());
+            }
+            if let Some(kbuild) = &package.kbuild {
+                recipe.kbuild = Some(kbuild.clone());
+            }
+            if let Some(cargo) = &package.cargo {
+                recipe.cargo = Some(cargo.clone());
+            }
+        }
         ensure!(
             recipe.schema == 1 && recipe.name == name,
             "invalid recipe schema/name for {name}"
@@ -223,12 +330,65 @@ pub fn recipes(root: &Path, preset: &Preset) -> Result<BTreeMap<String, Recipe>>
             recipe.backend
         );
         ensure!(
-            recipe.backend != "prebuilt" || recipe.file.is_some() || recipe.patches.is_empty(),
-            "raw prebuilt package {name} cannot apply source patches"
+            (recipe.backend == "kbuild") == recipe.kbuild.is_some(),
+            "{name}: kbuild backend requires [kbuild] settings"
+        );
+        ensure!(
+            (recipe.backend == "cargo") == recipe.cargo.is_some(),
+            "{name}: [cargo] settings are required only for the cargo backend"
+        );
+        if recipe.backend == "cargo" {
+            crate::backend::cargo::validate(&recipe)?;
+        }
+        if recipe.backend == "prebuilt" {
+            crate::backend::prebuilt::validate(&recipe)?;
+        }
+        ensure!(
+            recipe.backend == "prebuilt" || recipe.file.is_none(),
+            "{name}: file is only supported by prebuilt packages"
+        );
+        let archive_builder = recipe.backend == "kbuild";
+        ensure!(
+            recipe.toolchain.is_none() || archive_builder,
+            "{name}: a toolchain archive requires an archive builder"
+        );
+        ensure!(
+            archive_builder || !recipe.in_tree,
+            "{name}: in_tree is only supported by archive builders"
+        );
+        ensure!(
+            !archive_builder || recipe.extra_sources.is_empty(),
+            "{name}: extra_sources currently require a native builder"
+        );
+        if archive_builder {
+            ensure!(
+                recipe.extract,
+                "{name}: archive builders require source extraction"
+            );
+            crate::backend::kbuild::validate(&recipe)?;
+        }
+        for alias in recipe.extra_sources.keys() {
+            validate_name(alias)?;
+        }
+        for input in &recipe.inputs {
+            ensure!(
+                input_path(root, input)?.is_file(),
+                "input must be a file: {input}"
+            );
+        }
+        ensure!(
+            (recipe.extract
+                && !archive_builder
+                && (recipe.backend != "prebuilt" || recipe.file.is_some()))
+                || recipe.patches.is_empty(),
+            "{name}: patches require native source extraction"
         );
         validate_filename(&recipe.artifact)?;
         if let Some(file) = &recipe.file {
             validate_filename(file)?;
+        }
+        for artifact in recipe.artifacts.values() {
+            validate_filename(artifact)?;
         }
         pending.extend(recipe.dependencies.clone());
         result.insert(name, recipe);

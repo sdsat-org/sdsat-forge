@@ -1,7 +1,8 @@
 schema = 1
 arch = "riscv64"
-firmware_target = "riscv64gc-unknown-none-elf"
-firmware_config = "boards/qemu/virt-riscv64/rustsbi.toml"
+
+[packages.rustsbi]
+config = "boards/qemu/virt-riscv64/rustsbi.toml"
 
 [qemu]
 program = "qemu-system-riscv64"

@@ -1,0 +1,37 @@
+# Vendor BSP versions follow SpacemiT Buildroot k1-bl-v2.2.11-release.
+schema = 1
+
+[sources.rustsbi]
+version = "c11e9d2c7850cc9672329e8a4f372214bd31d090"
+url = "https://codeload.github.com/rustsbi/rustsbi/tar.gz/c11e9d2c7850cc9672329e8a4f372214bd31d090"
+sha256 = "85320b8bf4e7e6ef1455c7a8c865f8e596df83b6c189bae81f185678846ddbac"
+
+[sources.linux]
+version = "k1-bl-v2.2.11-release (31c449aeaad8c7759bc983ca0e26946e5b6746dc)"
+url = "https://codeload.github.com/spacemit-com/linux-6.6/tar.gz/31c449aeaad8c7759bc983ca0e26946e5b6746dc"
+sha256 = "0cc1e20906df587659115eec78e0cd3166d889dc0d14750ae135cc4f9579c72e"
+
+[sources.uboot]
+version = "k1-bl-v2.2.11-release (1fa1ca64e9705a3650bcc7c21f6666949290830f)"
+url = "https://codeload.github.com/spacemit-com/uboot-2022.10/tar.gz/1fa1ca64e9705a3650bcc7c21f6666949290830f"
+sha256 = "0ca6bf5c4c457698be276ecf7cff118fa2f16bbb301312641f0d5825e7c4b038"
+
+[sources.bootlin-riscv64-musl]
+version = "2024.05-1"
+url = "https://toolchains.bootlin.com/downloads/releases/toolchains/riscv64-lp64d/tarballs/riscv64-lp64d--musl--stable-2024.05-1.tar.xz"
+sha256 = "481c9353467f42d02edf9080954b3c14a75ff7c19ed9e8fbf9cfa67d028587d3"
+
+[sources.busybox]
+version = "1.38.0"
+url = "https://busybox.net/downloads/busybox-1.38.0.tar.bz2"
+sha256 = "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2"
+
+[sources.spacemit-esos]
+version = "855fba3e9458d69d08f71bad66e42e87979e6885"
+url = "https://raw.githubusercontent.com/spacemit-com/buildroot-ext/855fba3e9458d69d08f71bad66e42e87979e6885/board/spacemit/k1/target_overlay/lib/firmware/esos.elf"
+sha256 = "a7ef0129310a0fdc71d848490b4d6fdd73fbecc31d9f6b314662617dfdaaaefc"
+
+[sources.spacemit-esos-license]
+version = "855fba3e9458d69d08f71bad66e42e87979e6885"
+url = "https://raw.githubusercontent.com/spacemit-com/buildroot-ext/855fba3e9458d69d08f71bad66e42e87979e6885/board/spacemit/k1/target_overlay/lib/firmware/LICENSE.spacemit_esos"
+sha256 = "43b0f671f9b5c17dd5977fe7584974a4481a14a677afd9b36aee6612c2c7fcc0"

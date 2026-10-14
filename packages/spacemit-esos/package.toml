@@ -1,0 +1,11 @@
+schema = 1
+name = "spacemit-esos"
+backend = "prebuilt"
+source = "spacemit-esos"
+artifact = "esos.elf"
+
+[extra_sources]
+license = "spacemit-esos-license"
+
+[artifacts]
+"${extra.license}" = "LICENSE.spacemit_esos"

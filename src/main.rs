@@ -31,10 +31,7 @@ enum Action {
     /// List versioned system presets.
     ListDefconfigs,
     /// Select a preset and reset its active configuration.
-    Defconfig {
-        #[arg(default_value=config::DEFAULT_CONFIG)]
-        name: String,
-    },
+    Defconfig { name: String },
     /// Display the resolved dependency graph without downloading or compiling.
     Plan,
     /// Fetch and verify all pinned source archives (Cargo dependencies are fetched during builds).
@@ -57,7 +54,7 @@ enum Action {
     },
     /// Inspect local programs and the profile Rust toolchain.
     Doctor,
-    /// Install the profile Rust toolchain and firmware conversion helper with rustup/Cargo.
+    /// Install the profile Rust toolchain and helpers declared by the packages.
     Setup,
     /// Save the active configuration as a new preset, retaining its source lock reference.
     Savedefconfig { name: String },
@@ -148,14 +145,11 @@ fn execute(cli: Cli) -> Result<()> {
 
 fn doctor(build: &Build) -> Result<()> {
     let mut missing = Vec::new();
-    for program in [
-        "cargo",
-        "rustup",
-        "curl",
-        "git",
-        "rust-objcopy",
-        &build.board.qemu.program,
-    ] {
+    for program in ["cargo", "rustup", "curl", "git"]
+        .into_iter()
+        .chain(build.host_tools())
+        .chain(build.board.qemu.as_ref().map(|q| q.program.as_str()))
+    {
         match Command::new(program).arg("--version").output() {
             Ok(output) if output.status.success() => {
                 let text = String::from_utf8_lossy(&output.stdout);
@@ -193,32 +187,48 @@ fn doctor(build: &Build) -> Result<()> {
 
 fn setup(build: &Build) -> Result<()> {
     let targets = build.rust_targets().join(",");
-    process::run(
-        "rustup",
-        [
-            "toolchain",
-            "install",
-            &build.profile.toolchain,
-            "--profile",
-            "minimal",
-            "--component",
-            "rust-src,llvm-tools-preview",
-            "--target",
-            &targets,
-        ],
-        &build.root,
-    )?;
-    process::run(
-        "cargo",
-        [
-            "+stable",
-            "install",
-            "--locked",
-            "cargo-binutils",
-            "--version",
-            "0.4.0",
-        ],
-        &build.root,
-    )?;
+    let components = build.rust_components().join(",");
+    let mut args = vec![
+        "toolchain",
+        "install",
+        &build.profile.toolchain,
+        "--profile",
+        "minimal",
+    ];
+    if !components.is_empty() {
+        args.extend(["--component", &components]);
+    }
+    if !targets.is_empty() {
+        args.extend(["--target", &targets]);
+    }
+    process::run("rustup", args, &build.root)?;
+    for toolchain in build
+        .cargo_tools()
+        .iter()
+        .map(|tool| &tool.toolchain)
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        if toolchain != &build.profile.toolchain {
+            process::run(
+                "rustup",
+                ["toolchain", "install", toolchain, "--profile", "minimal"],
+                &build.root,
+            )?;
+        }
+    }
+    for tool in build.cargo_tools() {
+        process::run(
+            "cargo",
+            [
+                &format!("+{}", tool.toolchain),
+                "install",
+                "--locked",
+                &tool.name,
+                "--version",
+                &tool.version,
+            ],
+            &build.root,
+        )?;
+    }
     Ok(())
 }

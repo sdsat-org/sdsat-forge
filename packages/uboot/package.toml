@@ -1,7 +1,18 @@
 schema = 1
 name = "uboot"
-backend = "uboot"
+backend = "kbuild"
 source = "uboot"
 config = "boards/qemu/virt-riscv64/uboot.defconfig"
 toolchain = "bootlin-riscv64-musl"
 artifact = "u-boot.bin"
+build_output = "u-boot.bin"
+args = ["u-boot.bin"]
+
+[kbuild]
+tools = ["gcc", "xz", "bzip2", "bash", "flex", "bison", "bc", "perl", "python3", "pkg-config"]
+config = "olddefconfig"
+arch = "riscv"
+compiler_pattern = "riscv64*-gcc"
+compiler_suffix = "gcc"
+host_os = "Linux"
+host_arch = "x86_64"

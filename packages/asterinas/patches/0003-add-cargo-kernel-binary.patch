@@ -1,0 +1,120 @@
+Subject: [PATCH] kernel: add a Cargo-buildable executable to the workspace
+
+Expose the OSDK entry template as a small workspace binary so plain Cargo
+can build the kernel with the upstream profiles and locked dependencies.
+The binary preserves the kernel's default features and the OSDK panic
+handler and allocators. It is selected explicitly with --package and does
+not change the workspace's default members.
+
+Only the local binary package is added to Cargo.lock; existing external
+package versions, sources and checksums remain unchanged. The entry source
+is derived from the upstream OSDK template and retains its MPL-2.0 license.
+
+---
+diff --git a/Cargo.lock b/Cargo.lock
+index f8399dd..bb1c588 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -492,6 +492,16 @@ dependencies = [
+  "ostd",
+ ]
+
++[[package]]
++name = "asterinas-osdk-bin"
++version = "0.1.0"
++dependencies = [
++ "asterinas",
++ "osdk-frame-allocator",
++ "osdk-heap-allocator",
++ "ostd",
++]
++
+ [[package]]
+ name = "atomic-integer-wrapper"
+ version = "0.1.0"
+diff --git a/Cargo.toml b/Cargo.toml
+index 794d039..65407fa 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -27,6 +27,7 @@ members = [
+     "ostd/libs/ostd-test",
+     "ostd/libs/padding-struct",
+     "kernel",
++    "kernel/osdk-bin",
+     "kernel/comps/drm",
+     "kernel/comps/i8042",
+     "kernel/comps/simpledrm",
+diff --git a/kernel/osdk-bin/Cargo.toml b/kernel/osdk-bin/Cargo.toml
+new file mode 100644
+index 0000000..4da3c46
+--- /dev/null
++++ b/kernel/osdk-bin/Cargo.toml
+@@ -0,0 +1,11 @@
++[package]
++name = "asterinas-osdk-bin"
++version = "0.1.0"
++edition.workspace = true
++license.workspace = true
++
++[dependencies]
++asterinas = { path = ".." }
++ostd.workspace = true
++osdk-frame-allocator = { path = "../../osdk/deps/frame-allocator" }
++osdk-heap-allocator = { path = "../../osdk/deps/heap-allocator" }
+diff --git a/kernel/osdk-bin/src/main.rs b/kernel/osdk-bin/src/main.rs
+new file mode 100644
+index 0000000..087b3b3
+--- /dev/null
++++ b/kernel/osdk-bin/src/main.rs
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: MPL-2.0
++
++// Derived from osdk/src/base_crate/main.rs.template.
++
++#![no_std]
++#![no_main]
++
++#![feature(linkage)]
++
++extern crate asterinas;
++
++#[panic_handler]
++fn panic(info: &core::panic::PanicInfo) -> ! {
++    unsafe extern "Rust" {
++        pub fn __ostd_panic_handler(info: &core::panic::PanicInfo) -> !;
++    }
++    unsafe { __ostd_panic_handler(info); }
++}
++
++mod default_frame_allocator {
++    use ostd::mm::frame::GlobalFrameAllocator;
++
++    use osdk_frame_allocator::FrameAllocator;
++    static FRAME_ALLOCATOR: FrameAllocator = FrameAllocator;
++
++    // SAFETY: The name does not collide with other symbols.
++    #[unsafe(no_mangle)]
++    #[linkage = "weak"]
++    static __GLOBAL_FRAME_ALLOCATOR_REF: &'static dyn GlobalFrameAllocator = &FRAME_ALLOCATOR;
++}
++
++mod default_heap_allocator {
++    use ostd::mm::heap::GlobalHeapAllocator;
++
++    use osdk_heap_allocator::{HeapAllocator, type_from_layout};
++    static HEAP_ALLOCATOR: HeapAllocator = HeapAllocator;
++
++    // SAFETY: The name does not collide with other symbols.
++    #[unsafe(no_mangle)]
++    #[linkage = "weak"]
++    static __GLOBAL_HEAP_ALLOCATOR_REF: &'static dyn GlobalHeapAllocator = &HEAP_ALLOCATOR;
++
++    // SAFETY: The name does not collide with other symbols.
++    #[unsafe(no_mangle)]
++    #[linkage = "weak"]
++    fn __global_heap_slot_info_from_layout(
++        layout: core::alloc::Layout,
++    ) -> Option<ostd::mm::heap::SlotInfo> {
++        type_from_layout(layout)
++    }
++}

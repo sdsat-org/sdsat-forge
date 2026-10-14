@@ -1,0 +1,14 @@
+schema = 1
+toolchain = "nightly-2026-07-21"
+firmware = "rustsbi"
+bootloader = "uboot"
+kernel = "linux"
+
+[rootfs]
+kind = "busybox"
+package = "busybox"
+init = "support/busybox"
+
+[boot]
+append = "console=ttyS0,115200 earlycon loglevel=4 rdinit=/init"
+test_append = "-- --forge-test"

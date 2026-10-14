@@ -1,0 +1,32 @@
+schema = 1
+arch = "riscv64"
+
+[sdcard]
+dtb = "k1-x_MUSE-Pi-Pro.dtb"
+
+[packages.rustsbi]
+config = "boards/spacemit/muse-pi-pro/rustsbi.toml"
+artifact = "rustsbi.bin"
+build_output = "${work}/target/${target}/release/rustsbi-prototyper-dynamic.bin"
+
+[packages.linux]
+config = "boards/spacemit/muse-pi-pro/linux.defconfig"
+args = ["Image", "spacemit/k1-x_MUSE-Pi-Pro.dtb"]
+
+[packages.linux.artifacts]
+"arch/riscv/boot/dts/spacemit/k1-x_MUSE-Pi-Pro.dtb" = "k1-x_MUSE-Pi-Pro.dtb"
+
+[packages.uboot]
+config = "boards/spacemit/muse-pi-pro/uboot.defconfig"
+in_tree = true
+args = ["all"]
+
+[packages.uboot.artifacts]
+"FSBL.bin" = "FSBL.bin"
+"bootinfo_sd.bin" = "bootinfo_sd.bin"
+"u-boot.itb" = "u-boot.itb"
+"u-boot-env-default.bin" = "u-boot-env-default.bin"
+
+[rootfs_files]
+"lib/firmware/esos.elf" = "spacemit-esos"
+"lib/firmware/LICENSE.spacemit_esos" = { package = "spacemit-esos", artifact = "LICENSE.spacemit_esos" }

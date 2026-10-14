@@ -5,7 +5,7 @@ set -eu
 
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export HOME=/root TERM=vt100 SHELL=/bin/sh
-export PS1='forge:\w# '
+export PS1='tianzhi:\w# '
 exec </dev/console >/dev/console 2>&1
 /bin/busybox --install -s /bin
 mount -t devtmpfs devtmpfs /dev

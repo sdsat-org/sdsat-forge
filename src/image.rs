@@ -1,4 +1,6 @@
-//! Package initramfs images and boot them with QEMU.
+//! Package system images and boot them with QEMU.
+
+pub mod spacemit_k1;
 
 use anyhow::{Context, Result, ensure};
 use std::fs::{self, File};
@@ -79,13 +81,48 @@ pub fn append_scripts(output: &Path, scripts: &[(&str, PathBuf)]) -> Result<()> 
             script.as_bytes(),
         )?;
     }
-    append_entry(&mut archive, 0, "TRAILER!!!", 0, (0, 0), &[])?;
-    pad(&mut archive, 512);
+    append_archive(output, &mut archive)
+}
+
+pub fn append_files(output: &Path, files: &[(String, PathBuf)]) -> Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut archive = Vec::new();
+    let mut directories = std::collections::BTreeSet::new();
+    for (index, (name, path)) in files.iter().enumerate() {
+        let mut directory = String::new();
+        let parts = name.split('/').collect::<Vec<_>>();
+        for part in &parts {
+            crate::config::validate_filename(part)?;
+        }
+        for part in &parts[..parts.len() - 1] {
+            directory.push_str(part);
+            if directories.insert(directory.clone()) {
+                append_entry(&mut archive, 0, &directory, 0o040755, (0, 0), &[])?;
+            }
+            directory.push('/');
+        }
+        append_entry(
+            &mut archive,
+            index as u32 + 1,
+            name,
+            0o100644,
+            (0, 0),
+            &fs::read(path)?,
+        )?;
+    }
+    append_archive(output, &mut archive)
+}
+
+fn append_archive(output: &Path, archive: &mut Vec<u8>) -> Result<()> {
+    append_entry(archive, 0, "TRAILER!!!", 0, (0, 0), &[])?;
+    pad(archive, 512);
     let mut file = fs::OpenOptions::new().append(true).open(output)?;
     // Each uncompressed newc member starts at a four-byte boundary.
     let padding = (4 - file.metadata()?.len() % 4) % 4;
     file.write_all(&[0; 3][..padding as usize])?;
-    file.write_all(&archive)?;
+    file.write_all(archive)?;
     Ok(())
 }
 

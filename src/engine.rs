@@ -1,7 +1,6 @@
 use crate::{
     config::{self, Board, Preset, Profile, Recipe, Rootfs},
     image::{self, QemuOptions},
-    process,
     source::{self, SourceLock},
 };
 use anyhow::{Context, Result, ensure};
@@ -29,7 +28,7 @@ pub struct Build {
 #[derive(Serialize, Deserialize)]
 struct State {
     fingerprint: String,
-    sha256: String,
+    artifacts: BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -119,28 +118,62 @@ impl Build {
             &format!("boards/{}/board.toml", preset.board),
         )?)?;
         ensure!(
-            board.schema == 1 && board.arch == "riscv64" && board.qemu.smp > 0,
+            board.schema == 1
+                && board.arch == "riscv64"
+                && board.qemu.as_ref().is_none_or(|q| q.smp > 0),
             "unsupported board schema/architecture/CPU count"
         );
+        if let Some(sdcard) = &board.sdcard {
+            config::validate_filename(&sdcard.dtb)?;
+            ensure!(
+                board.qemu.is_none(),
+                "SD hardware and QEMU boot are separate board configurations"
+            );
+        }
         let profile: Profile = config::read(&config::input_path(
             &root,
             &format!("profiles/{}/profile.toml", preset.profile),
         )?)?;
         ensure!(profile.schema == 1, "unsupported profile schema");
         let sources = source::load_lock(&config::input_path(&root, &preset.lock)?)?;
-        let recipes = config::recipes(&root, &preset)?;
+        let recipes = config::recipes(&root, &preset, &board)?;
+        for (path, file) in &board.rootfs_files {
+            for part in path.split('/') {
+                config::validate_filename(part)?;
+            }
+            let package = file.package();
+            let recipe = recipes.get(package).with_context(|| {
+                format!("rootfs file {path} refers to missing package {package}")
+            })?;
+            let artifact = file.artifact(recipe);
+            ensure!(
+                artifact == recipe.artifact
+                    || recipe.artifacts.values().any(|name| name == artifact),
+                "rootfs file {path} refers to undeclared artifact {artifact} in {package}"
+            );
+        }
         let mut artifacts = BTreeSet::from(["initramfs.cpio"]);
+        if board.sdcard.is_some() {
+            artifacts.extend(image::spacemit_k1::ARTIFACTS.iter().copied());
+        }
         for recipe in recipes.values() {
             ensure!(
                 sources.sources.contains_key(&recipe.source),
                 "unlocked source {}",
                 recipe.source
             );
-            ensure!(
-                artifacts.insert(&recipe.artifact),
-                "duplicate or reserved artifact {}",
-                recipe.artifact
-            );
+            for source in recipe.extra_sources.values() {
+                ensure!(
+                    sources.sources.contains_key(source),
+                    "unlocked extra source {source}"
+                );
+            }
+            for artifact in std::iter::once(&recipe.artifact).chain(recipe.artifacts.values()) {
+                ensure!(
+                    artifacts.insert(artifact),
+                    "duplicate or reserved artifact {artifact}"
+                );
+            }
             for patch in &recipe.patches {
                 config::input_path(&root, patch)?;
             }
@@ -153,7 +186,7 @@ impl Build {
                     "unlocked toolchain {toolchain}"
                 );
             }
-            if crate::backend::kbuild(&recipe.backend).is_some() {
+            if recipe.backend == "kbuild" {
                 ensure!(
                     recipe.config.is_some() && recipe.toolchain.is_some(),
                     "{} needs a config and toolchain source",
@@ -165,17 +198,6 @@ impl Build {
                     recipe.name
                 );
             }
-            if recipe.backend == "asterinas" {
-                ensure!(
-                    recipe.target.is_some(),
-                    "{} needs a Rust target",
-                    recipe.name
-                );
-            }
-            ensure!(
-                recipe.file.is_none() || recipe.backend == "prebuilt",
-                "file is only supported for prebuilt packages"
-            );
         }
         for name in [
             profile.firmware.as_str(),
@@ -190,26 +212,12 @@ impl Build {
                 "profile refers to missing package {name}"
             );
         }
-        if let Some(name) = &profile.bootloader {
-            ensure!(
-                recipes[name].backend == "uboot",
-                "bootloader needs a U-Boot package"
-            );
-            ensure!(
-                recipes[&profile.kernel].backend == "linux",
-                "U-Boot boot currently needs a Linux Image"
-            );
-        }
         ensure!(
             profile.boot.smp.is_none_or(|smp| smp > 0),
             "CPU count must be positive"
         );
         match &profile.rootfs {
-            Rootfs::Busybox { package, init } => {
-                ensure!(
-                    recipes[package].backend == "busybox",
-                    "BusyBox rootfs needs a busybox package"
-                );
+            Rootfs::Busybox { init, .. } => {
                 let directory = config::input_path(&root, init)?;
                 for name in ["init", "boot-check.sh"] {
                     ensure!(
@@ -218,11 +226,7 @@ impl Build {
                     );
                 }
             }
-            Rootfs::Prebuilt { package, scripts } => {
-                ensure!(
-                    recipes[package].backend == "prebuilt",
-                    "prebuilt rootfs needs a prebuilt package"
-                );
+            Rootfs::Prebuilt { scripts, .. } => {
                 for (name, path) in scripts {
                     config::validate_filename(name)?;
                     config::input_path(&root, path)?;
@@ -288,27 +292,50 @@ impl Build {
             .chain(self.profile.bootloader.as_deref())
             .chain([self.profile.kernel.as_str(), self.profile.rootfs.package()])
             .collect::<Vec<_>>();
-        println!("  QEMU: {}", stages.join(" -> "));
+        println!("  Boot: {}", stages.join(" -> "));
         Ok(())
     }
 
     pub fn rust_targets(&self) -> Vec<&str> {
-        std::iter::once(self.board.firmware_target.as_str())
-            .chain(self.recipes.values().filter_map(|r| r.target.as_deref()))
+        self.recipes
+            .values()
+            .filter_map(|r| r.target.as_deref())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    pub fn rust_components(&self) -> Vec<&str> {
+        self.recipes
+            .values()
+            .flat_map(|r| r.rust_components.iter().map(String::as_str))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    pub fn host_tools(&self) -> Vec<&str> {
+        self.recipes
+            .values()
+            .flat_map(|r| r.host_tools.iter().map(String::as_str))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    pub fn cargo_tools(&self) -> Vec<&config::CargoTool> {
+        self.recipes
+            .values()
+            .flat_map(|r| &r.cargo_tools)
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
     }
 
     pub fn check_host(&self) -> Result<()> {
-        let backends = self
-            .recipes
-            .values()
-            .map(|recipe| recipe.backend.as_str())
-            .collect::<BTreeSet<_>>();
-        for name in backends {
-            if let Some(backend) = crate::backend::kbuild(name) {
-                backend.check_host()?;
+        for recipe in self.recipes.values() {
+            if recipe.backend == "kbuild" {
+                crate::backend::kbuild::check_host(recipe)?;
             }
         }
         Ok(())
@@ -321,21 +348,29 @@ impl Build {
     }
 
     fn system_artifacts(&self) -> Vec<&str> {
-        let mut artifacts = vec![
-            self.recipes[&self.profile.firmware].artifact.as_str(),
-            self.recipes[&self.profile.kernel].artifact.as_str(),
-            "initramfs.cpio",
-        ];
-        if let Some(name) = &self.profile.bootloader {
-            artifacts.push(&self.recipes[name].artifact);
-        }
-        artifacts
+        self.recipes
+            .values()
+            .flat_map(|recipe| {
+                std::iter::once(recipe.artifact.as_str())
+                    .chain(recipe.artifacts.values().map(String::as_str))
+            })
+            .chain(["initramfs.cpio"])
+            .chain(
+                self.board
+                    .sdcard
+                    .iter()
+                    .flat_map(|_| image::spacemit_k1::ARTIFACTS.iter().copied()),
+            )
+            .collect()
     }
 
     pub fn fetch_all(&self) -> Result<()> {
         for name in self.order(None)? {
             let recipe = &self.recipes[&name];
-            for input in std::iter::once(&recipe.source).chain(recipe.toolchain.iter()) {
+            for input in std::iter::once(&recipe.source)
+                .chain(recipe.toolchain.iter())
+                .chain(recipe.extra_sources.values())
+            {
                 source::fetch(&self.sources.sources[input], &self.root.join("dl"))?;
             }
         }
@@ -409,16 +444,19 @@ impl Build {
         ))?;
         data.extend_from_slice(include_bytes!("engine.rs"));
         let recipe = &self.recipes[name];
-        match recipe.backend.as_str() {
-            "asterinas" => data.extend_from_slice(include_bytes!("backend/asterinas.rs")),
-            "busybox" => data.extend_from_slice(include_bytes!("backend/busybox.rs")),
-            "linux" => data.extend_from_slice(include_bytes!("backend/linux.rs")),
-            "uboot" => data.extend_from_slice(include_bytes!("backend/uboot.rs")),
-            _ => (),
+        data.extend_from_slice(include_bytes!("config.rs"));
+        data.extend_from_slice(include_bytes!("process.rs"));
+        data.extend_from_slice(include_bytes!("source.rs"));
+        data.extend_from_slice(include_bytes!("backend/mod.rs"));
+        data.extend_from_slice(include_bytes!("backend/cargo.rs"));
+        if recipe.backend == "kbuild" {
+            data.extend_from_slice(include_bytes!("backend/kbuild.rs"));
         }
-        if crate::backend::kbuild(&recipe.backend).is_some() {
-            data.extend_from_slice(include_bytes!("backend/builder.rs"));
-            data.extend_from_slice(include_bytes!("backend/mod.rs"));
+        if recipe.backend == "prebuilt" {
+            data.extend_from_slice(include_bytes!("backend/prebuilt.rs"));
+        }
+        for source in recipe.extra_sources.values() {
+            data.extend(serde_json::to_vec(&self.sources.sources[source])?);
         }
         if let Some(path) = &recipe.config {
             data.extend(fs::read(config::input_path(&self.root, path)?)?);
@@ -431,10 +469,9 @@ impl Build {
         for patch in self.patch_paths(name)? {
             data.extend(fs::read(patch)?);
         }
-        data.extend(fs::read(config::input_path(
-            &self.root,
-            &self.board.firmware_config,
-        )?)?);
+        for input in &recipe.inputs {
+            data.extend(fs::read(config::input_path(&self.root, input)?)?);
+        }
         for dependency in &self.recipes[name].dependencies {
             data.extend(fs::read(
                 self.output.join(format!("state/{dependency}.json")),
@@ -463,7 +500,8 @@ impl Build {
         }
         for name in order {
             let recipe = &self.recipes[&name];
-            let source = if crate::backend::kbuild(&recipe.backend).is_some()
+            let source = if recipe.backend == "kbuild"
+                || !recipe.extract
                 || (recipe.backend == "prebuilt" && recipe.file.is_none())
             {
                 source::fetch(&self.sources.sources[&recipe.source], &self.root.join("dl"))?
@@ -477,18 +515,24 @@ impl Build {
                 .ok()
                 .and_then(|s| serde_json::from_slice::<State>(&s).ok());
             let cached = state.is_some_and(|s| {
-                s.fingerprint == fingerprint && digest_file(&artifact).is_ok_and(|d| d == s.sha256)
+                s.fingerprint == fingerprint
+                    && std::iter::once(&recipe.artifact)
+                        .chain(recipe.artifacts.values())
+                        .all(|name| {
+                            digest_file(&self.output.join("images").join(name))
+                                .is_ok_and(|hash| s.artifacts.get(name) == Some(&hash))
+                        })
             });
             if cached && !(force && package == Some(name.as_str())) {
                 println!("[cached] {name}");
                 continue;
             }
             let work = self.output.join(format!("build/{name}-work"));
-            if recipe.backend != "prebuilt" {
-                safe_directory(&self.root, &work)?;
-            }
-            let built = if let Some(backend) = crate::backend::kbuild(&recipe.backend) {
-                backend.build(
+            safe_directory(&self.root, &work)?;
+            let variables = self.build_variables(recipe, &source, &work)?;
+            let built = match recipe.backend.as_str() {
+                "kbuild" => crate::backend::kbuild::build(
+                    recipe,
                     &source,
                     &source::fetch(
                         &self.sources.sources[recipe.toolchain.as_ref().unwrap()],
@@ -496,35 +540,48 @@ impl Build {
                     )?,
                     &config::input_path(&self.root, recipe.config.as_deref().unwrap())?,
                     &work,
-                )?
-            } else {
-                match recipe.backend.as_str() {
-                    "asterinas" => crate::backend::asterinas::build(
-                        &source,
-                        &self.output.join("images"),
-                        &work,
-                        &self.profile.toolchain,
-                        recipe.target.as_deref().unwrap(),
-                    )?,
-                    "rustsbi" => self.firmware(&source, &work)?,
-                    "prebuilt" => recipe
-                        .file
-                        .as_ref()
-                        .map_or_else(|| source.clone(), |file| source.join(file)),
-                    _ => unreachable!("validated backend"),
-                }
+                )?,
+                "cargo" => crate::backend::cargo::build(recipe, &variables)?,
+                "prebuilt" => crate::backend::prebuilt::build(recipe, &source, &variables)?,
+                _ => unreachable!("validated backend"),
             };
-            if built != artifact {
-                publish(&artifact, &fs::read(built)?)?;
+            if built.primary != artifact {
+                publish(&artifact, &fs::read(&built.primary)?)?;
             }
+            for (name, source) in built.additional {
+                publish(
+                    &self.output.join("images").join(&name),
+                    &fs::read(&source)
+                        .with_context(|| format!("reading artifact {}", source.display()))?,
+                )?;
+            }
+            let artifacts = std::iter::once(&recipe.artifact)
+                .chain(recipe.artifacts.values())
+                .map(|name| {
+                    Ok((
+                        name.clone(),
+                        digest_file(&self.output.join("images").join(name))?,
+                    ))
+                })
+                .collect::<Result<_>>()?;
             let state = State {
                 fingerprint,
-                sha256: digest_file(&artifact)?,
+                artifacts,
             };
             publish(&state_path, &serde_json::to_vec(&state)?)?;
         }
         if package.is_none() {
             self.initramfs()?;
+            if let Some(sdcard) = &self.board.sdcard {
+                image::spacemit_k1::create(
+                    &self.output.join("images"),
+                    &self.artifact(&self.profile.firmware),
+                    &self.artifact(&self.profile.kernel),
+                    &self.output.join("images/initramfs.cpio"),
+                    &self.profile.boot.append,
+                    &sdcard.dtb,
+                )?;
+            }
             let artifacts = self
                 .system_artifacts()
                 .iter()
@@ -550,20 +607,45 @@ impl Build {
         Ok(())
     }
 
-    fn firmware(&self, source: &Path, work: &Path) -> Result<PathBuf> {
-        let target = work.join("target");
-        let mut cmd = Command::new("cargo");
-        process::isolate_rust(&mut cmd);
-        cmd.arg(format!("+{}", self.profile.toolchain))
-            .args(["prototyper", "build", "--config-file"])
-            .arg(config::input_path(&self.root, &self.board.firmware_config)?)
-            .args(["--target", &self.board.firmware_target, "dynamic"])
-            .current_dir(source)
-            .env("CARGO_TARGET_DIR", &target);
-        process::logged(&mut cmd, &self.output.join("logs/rustsbi.log"))?;
-        Ok(target
-            .join(&self.board.firmware_target)
-            .join("release/rustsbi-prototyper-dynamic.elf"))
+    fn build_variables(
+        &self,
+        recipe: &Recipe,
+        source: &Path,
+        work: &Path,
+    ) -> Result<BTreeMap<String, String>> {
+        let path_text = |path: &Path| -> Result<String> {
+            Ok(path
+                .to_str()
+                .context("build paths must be UTF-8")?
+                .replace('\\', "/"))
+        };
+        let mut variables = BTreeMap::from([
+            ("root".into(), path_text(&self.root)?),
+            ("source".into(), path_text(source)?),
+            ("work".into(), path_text(work)?),
+            ("images".into(), path_text(&self.output.join("images"))?),
+            ("toolchain".into(), self.profile.toolchain.clone()),
+        ]);
+        if let Some(target) = &recipe.target {
+            variables.insert("target".into(), target.clone());
+        }
+        if let Some(config) = &recipe.config {
+            variables.insert(
+                "config".into(),
+                path_text(&config::input_path(&self.root, config)?)?,
+            );
+        }
+        for dependency in &recipe.dependencies {
+            variables.insert(
+                format!("dep.{dependency}"),
+                path_text(&self.artifact(dependency))?,
+            );
+        }
+        for (alias, source) in &recipe.extra_sources {
+            let archive = source::fetch(&self.sources.sources[source], &self.root.join("dl"))?;
+            variables.insert(format!("extra.{alias}"), path_text(&archive)?);
+        }
+        Ok(variables)
     }
 
     fn initramfs(&self) -> Result<()> {
@@ -586,7 +668,21 @@ impl Build {
                     .collect::<Result<Vec<_>>>()?;
                 image::append_scripts(&output, &scripts)
             }
-        }
+        }?;
+        let files = self
+            .board
+            .rootfs_files
+            .iter()
+            .map(|(path, file)| {
+                (
+                    path.clone(),
+                    self.output
+                        .join("images")
+                        .join(file.artifact(&self.recipes[file.package()])),
+                )
+            })
+            .collect::<Vec<_>>();
+        image::append_files(&output, &files)
     }
 
     fn inputs_digest(&self) -> Result<String> {
@@ -597,10 +693,6 @@ impl Build {
             &self.sources,
             &self.recipes,
         ))?;
-        data.extend(fs::read(config::input_path(
-            &self.root,
-            &self.board.firmware_config,
-        )?)?);
         match &self.profile.rootfs {
             Rootfs::Busybox { init, .. } => {
                 let directory = config::input_path(&self.root, init)?;
@@ -615,12 +707,22 @@ impl Build {
             }
         }
         data.extend_from_slice(include_bytes!("image.rs"));
+        data.extend_from_slice(include_bytes!("image/spacemit_k1.rs"));
+        data.extend_from_slice(include_bytes!("engine.rs"));
+        data.extend_from_slice(include_bytes!("config.rs"));
+        data.extend_from_slice(include_bytes!("backend/mod.rs"));
+        data.extend_from_slice(include_bytes!("backend/cargo.rs"));
+        data.extend_from_slice(include_bytes!("backend/kbuild.rs"));
+        data.extend_from_slice(include_bytes!("backend/prebuilt.rs"));
         for name in self.recipes.keys() {
             if let Some(path) = &self.recipes[name].config {
                 data.extend(fs::read(config::input_path(&self.root, path)?)?);
             }
             for patch in self.patch_paths(name)? {
                 data.extend(fs::read(patch)?);
+            }
+            for input in &self.recipes[name].inputs {
+                data.extend(fs::read(config::input_path(&self.root, input)?)?);
             }
         }
         Ok(hash(data))
@@ -632,12 +734,19 @@ impl Build {
     }
 
     pub fn test_boot(&self, timeout: Duration, qemu: Option<&str>) -> Result<()> {
+        ensure!(
+            self.board.qemu.is_some(),
+            "test-boot requires a QEMU board; hardware boot must be verified through its serial console"
+        );
         let _guard = WorkspaceGuard::acquire(&self.root, &self.preset.name)?;
         self.build_inner(None, false)?;
         self.run_inner(Some(timeout), qemu)
     }
 
     fn run_inner(&self, timeout: Option<Duration>, qemu: Option<&str>) -> Result<()> {
+        let q = self.board.qemu.as_ref().context(
+            "this board boots on hardware; write its SD image to a card instead of running QEMU",
+        )?;
         let manifest: Manifest = serde_json::from_slice(
             &fs::read(self.output.join("manifests/build.json"))
                 .context("no complete system image; run forge build")?,
@@ -653,7 +762,6 @@ impl Build {
                 "artifact {name} changed; run forge build"
             );
         }
-        let q = &self.board.qemu;
         let options = QemuOptions {
             program: qemu.unwrap_or(&q.program).into(),
             machine: q.machine.clone(),

@@ -1,11 +1,35 @@
 schema = 1
 name = "asterinas"
-backend = "asterinas"
+backend = "cargo"
+
 dependencies = ["linux-vdso"]
 source = "asterinas"
 patches = [
     "packages/asterinas/patches/0001-short-vis-path-normalize-windows-paths.patch",
     "packages/asterinas/patches/0002-component-macro-use-manifest-path.patch",
+    "packages/asterinas/patches/0003-add-cargo-kernel-binary.patch",
 ]
 artifact = "asterinas.elf"
+
 target = "riscv64imac-unknown-none-elf"
+rust_components = ["rust-src"]
+build_output = "${work}/target/${target}/release/asterinas-osdk-bin"
+args = [
+    "build", "--locked", "--release", "--package", "asterinas-osdk-bin",
+    "--target", "${target}",
+    "--target-dir", "${work}/target",
+    "-Zbuild-std=core,alloc,compiler_builtins",
+    "-Zbuild-std-features=compiler-builtins-mem",
+]
+
+[cargo]
+cwd = "${source}"
+
+[cargo.env]
+CARGO_ENCODED_RUSTFLAGS = "-Clink-arg=-T${source}/osdk/src/base_crate/riscv64.ld.template\u001f-Crelocation-model=static\u001f-Crelro-level=off\u001f-Cforce-unwind-tables=yes\u001f--check-cfg=cfg(ktest)\u001f-Cno-redzone=y\u001f-Ctarget-feature=+zicbom"
+VDSO_LIBRARY_DIR = "${images}"
+OSTD_TASK_STACK_SIZE_IN_PAGES = "16"
+OSDK_BUILD_USERNAME = "sdsat-forge"
+OSDK_BUILD_HOSTNAME = "forge-builder"
+OSDK_BUILD_RUSTC = "${toolchain}"
+ASTER_BUILD_TIMESTAMP = "1970-01-01T00:00:00Z"

@@ -1,6 +1,24 @@
 schema = 1
 name = "rustsbi"
-backend = "rustsbi"
+backend = "cargo"
+
 dependencies = []
 source = "rustsbi"
 artifact = "rustsbi.elf"
+
+target = "riscv64gc-unknown-none-elf"
+build_output = "${work}/target/${target}/release/rustsbi-prototyper-dynamic.elf"
+host_tools = ["rust-objcopy"]
+rust_components = ["rust-src", "llvm-tools-preview"]
+args = ["prototyper", "build", "--config-file", "${config}", "--target", "${target}", "dynamic"]
+
+[cargo]
+cwd = "${source}"
+
+[cargo.env]
+CARGO_TARGET_DIR = "${work}/target"
+
+[[cargo_tools]]
+name = "cargo-binutils"
+version = "0.4.0"
+toolchain = "stable"

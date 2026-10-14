@@ -1,7 +1,21 @@
 schema = 1
 name = "busybox"
-backend = "busybox"
+backend = "kbuild"
 source = "busybox"
 config = "packages/busybox/defconfig"
 toolchain = "bootlin-riscv64-musl"
 artifact = "busybox.elf"
+build_output = "busybox"
+args = [
+    "EXTRA_CFLAGS=-march=rv64gc -mabi=lp64d -Os",
+    "EXTRA_LDFLAGS=-march=rv64gc -mabi=lp64d",
+]
+
+[kbuild]
+tools = ["gcc", "xz", "bzip2"]
+config = "defconfig"
+arch = "riscv"
+compiler_pattern = "riscv64*-gcc"
+compiler_suffix = "gcc"
+host_os = "Linux"
+host_arch = "x86_64"

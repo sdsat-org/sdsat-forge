@@ -21,3 +21,7 @@ toml = "0.8"
 tempfile = "3.27"
 flate2 = "1.1"
 tar = "0.4"
+gptman = { version = "3", default-features = false }
+vm-fdt = "0.3"
+crc32fast = "1.5"
+fatfs = { version = "0.3", default-features = false, features = ["std", "alloc"] }
