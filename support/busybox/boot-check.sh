@@ -30,3 +30,8 @@ grep -q 'proc /proc proc' /proc/mounts
 rm /tmp/forge-check/original /tmp/forge-check/copy
 rmdir /tmp/forge-check
 echo 'BusyBox checks passed.'
+
+for check in /etc/forge/boot-check.d/*.sh; do
+    [ -f "$check" ] || continue
+    /bin/sh "$check"
+done

@@ -1,0 +1,13 @@
+schema = 1
+name = "cni-plugins"
+backend = "prebuilt"
+source = "cni-plugins"
+artifact = "bridge"
+file = "bridge"
+
+[artifacts]
+"${source}/host-local" = "host-local"
+"${source}/loopback" = "loopback"
+"${source}/LICENSE" = "LICENSE.cni-plugins"
+"${source}/NOTICE" = "NOTICE.cni-plugins"
+"${source}/THIRD_PARTY_LICENSES.txt" = "THIRD_PARTY_LICENSES.cni-plugins.txt"

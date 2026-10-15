@@ -3,12 +3,49 @@ toolchain = "nightly-2026-07-21"
 firmware = "rustsbi"
 kernel = "asterinas"
 
+[rootfs_files]
+"usr/bin/kubernetes-start" = { package = "kubernetes", artifact = "kubernetes-start.sh", mode = 0o755 }
+"etc/forge/boot-check.d/kubernetes.sh" = { package = "kubernetes", artifact = "kubernetes-check.sh", mode = 0o755 }
+"etc/kubernetes/forge/start.sh" = { package = "kubernetes", artifact = "kubernetes-start.sh", mode = 0o755 }
+"etc/kubernetes/forge/check.sh" = { package = "kubernetes", artifact = "kubernetes-check.sh", mode = 0o755 }
+"etc/kubernetes/forge/make-image.sh" = { package = "kubernetes", artifact = "kubernetes-make-image.sh", mode = 0o755 }
+"etc/kubernetes/forge/containerd.toml" = { package = "kubernetes", artifact = "kubernetes-containerd.toml" }
+"etc/kubernetes/forge/kubelet.yaml" = { package = "kubernetes", artifact = "kubernetes-kubelet.yaml" }
+"etc/kubernetes/forge/pod.yaml" = { package = "kubernetes", artifact = "kubernetes-pod.yaml" }
+"usr/bin/containerd" = { package = "containerd", artifact = "containerd", mode = 0o755 }
+"usr/bin/containerd-shim-runc-v2" = { package = "containerd", artifact = "containerd-shim-runc-v2", mode = 0o755 }
+"usr/bin/ctr" = { package = "containerd", artifact = "ctr", mode = 0o755 }
+"usr/bin/runc" = { package = "runc-asterinas", artifact = "runc", mode = 0o755 }
+"usr/share/licenses/containerd/LICENSE" = { package = "containerd", artifact = "LICENSE.containerd" }
+"usr/share/licenses/containerd/NOTICE" = { package = "containerd", artifact = "NOTICE.containerd" }
+"usr/share/licenses/containerd/THIRD_PARTY_LICENSES.txt" = { package = "containerd", artifact = "THIRD_PARTY_LICENSES.containerd.txt" }
+"usr/share/licenses/runc/LICENSE" = { package = "runc-asterinas", artifact = "LICENSE.runc" }
+"usr/share/licenses/runc/NOTICE" = { package = "runc-asterinas", artifact = "NOTICE.runc" }
+"usr/share/licenses/runc/THIRD_PARTY_LICENSES.txt" = { package = "runc-asterinas", artifact = "THIRD_PARTY_LICENSES.runc.txt" }
+"usr/bin/etcd" = { package = "etcd", artifact = "etcd", mode = 0o755 }
+"usr/bin/etcdctl" = { package = "etcd", artifact = "etcdctl", mode = 0o755 }
+"usr/share/licenses/etcd/LICENSE" = { package = "etcd", artifact = "LICENSE.etcd" }
+"usr/share/licenses/etcd/NOTICE" = { package = "etcd", artifact = "NOTICE.etcd" }
+"usr/share/licenses/etcd/THIRD_PARTY_LICENSES.txt" = { package = "etcd", artifact = "THIRD_PARTY_LICENSES.etcd.txt" }
+"usr/bin/kubeadm" = { package = "kubernetes", artifact = "kubeadm", mode = 0o755 }
+"usr/bin/kubectl" = { package = "kubernetes", artifact = "kubectl", mode = 0o755 }
+"usr/bin/kube-apiserver" = { package = "kubernetes", artifact = "kube-apiserver", mode = 0o755 }
+"usr/bin/kube-controller-manager" = { package = "kubernetes", artifact = "kube-controller-manager", mode = 0o755 }
+"usr/bin/kube-scheduler" = { package = "kubernetes", artifact = "kube-scheduler", mode = 0o755 }
+"usr/bin/kubelet" = { package = "kubernetes", artifact = "kubelet", mode = 0o755 }
+"usr/bin/kube-proxy" = { package = "kubernetes", artifact = "kube-proxy", mode = 0o755 }
+"usr/share/licenses/kubernetes/LICENSE" = { package = "kubernetes", artifact = "kubernetes-LICENSE" }
+"usr/share/licenses/kubernetes/NOTICE" = { package = "kubernetes", artifact = "NOTICE.kubernetes" }
+"usr/share/licenses/kubernetes/THIRD_PARTY_LICENSES.txt" = { package = "kubernetes", artifact = "THIRD_PARTY_LICENSES.kubernetes.txt" }
+
 [rootfs]
 kind = "busybox"
 package = "busybox"
 init = "support/busybox"
 
 [boot]
+memory = "4G"
+qemu_args = ["-netdev", "user,id=net0,restrict=on", "-device", "virtio-net-device,netdev=net0"]
 # Asterinas logs every syscall at info level.
 append = "loglevel=warn console=ttyS0 rdinit=/bin/sh SHELL=/bin/sh LOGNAME=root HOME=/root USER=root PATH=/bin -- /init"
 test_append = "--forge-test"

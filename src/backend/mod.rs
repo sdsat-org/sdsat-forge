@@ -1,4 +1,5 @@
 pub mod cargo;
+pub mod go;
 pub mod kbuild;
 pub mod prebuilt;
 
@@ -8,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const BACKENDS: &[&str] = &["cargo", "kbuild", "prebuilt"];
+pub const BACKENDS: &[&str] = &["cargo", "go", "kbuild", "prebuilt"];
 
 pub struct BuildOutput {
     pub primary: PathBuf,

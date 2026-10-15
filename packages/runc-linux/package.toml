@@ -1,0 +1,20 @@
+schema = 1
+name = "runc-linux"
+backend = "prebuilt"
+source = "runc-linux"
+artifact = "runc"
+extract = false
+inputs = ["packages/runc-linux/NOTICE"]
+
+[extra_sources]
+runc-source = "runc-release-source"
+libseccomp-source = "libseccomp-source"
+runc-license = "runc-license"
+libseccomp-license = "libseccomp-license"
+
+[artifacts]
+"${extra.runc-source}" = "runc-source.tar.xz"
+"${extra.libseccomp-source}" = "libseccomp-source.tar.gz"
+"${extra.runc-license}" = "LICENSE.runc"
+"${extra.libseccomp-license}" = "LICENSE.libseccomp"
+"${root}/packages/runc-linux/NOTICE" = "NOTICE.runc"

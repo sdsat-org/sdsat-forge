@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: forge-network-server
+  namespace: default
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  dnsPolicy: Default
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: http
+      image: localhost/forge/busybox:local
+      imagePullPolicy: Never
+      command: ["/bin/busybox", "sh", "-ec"]
+      args:
+        - |
+          /bin/busybox mkdir -p /tmp/www
+          printf 'FORGE_CNI_HTTP_OK\n' > /tmp/www/index.html
+          exec /bin/busybox httpd -f -p 8080 -h /tmp/www
+      readinessProbe:
+        httpGet:
+          path: /
+          port: 8080
+        periodSeconds: 2
+        timeoutSeconds: 5
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]

@@ -1,0 +1,48 @@
+diff --git a/internal/cri/opts/spec_opts.go b/internal/cri/opts/spec_opts.go
+index dd42545..18c6b06 100644
+--- a/internal/cri/opts/spec_opts.go
++++ b/internal/cri/opts/spec_opts.go
+@@ -358,12 +358,22 @@ func WithNamespacePath(t runtimespec.LinuxNamespaceType, nsPath string) oci.Spec
+ func WithPodNamespaces(config *runtime.LinuxContainerSecurityContext, sandboxPid uint32, targetPid uint32, uids, gids []runtimespec.LinuxIDMapping) oci.SpecOpts {
+ 	namespaces := config.GetNamespaceOptions()
+ 
+-	opts := []oci.SpecOpts{
+-		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.NetworkNamespace, Path: GetNetworkNamespace(sandboxPid)}),
+-		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.IPCNamespace, Path: GetIPCNamespace(sandboxPid)}),
+-		oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.UTSNamespace, Path: GetUTSNamespace(sandboxPid)}),
++	var opts []oci.SpecOpts
++	if namespaces.GetNetwork() == runtime.NamespaceMode_NODE {
++		opts = append(opts, oci.WithHostNamespace(runtimespec.NetworkNamespace), oci.WithHostNamespace(runtimespec.UTSNamespace))
++	} else {
++		opts = append(opts,
++			oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.NetworkNamespace, Path: GetNetworkNamespace(sandboxPid)}),
++			oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.UTSNamespace, Path: GetUTSNamespace(sandboxPid)}))
++	}
++	if namespaces.GetIpc() == runtime.NamespaceMode_NODE {
++		opts = append(opts, oci.WithHostNamespace(runtimespec.IPCNamespace))
++	} else {
++		opts = append(opts, oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.IPCNamespace, Path: GetIPCNamespace(sandboxPid)}))
+ 	}
+-	if namespaces.GetPid() != runtime.NamespaceMode_CONTAINER {
++	if namespaces.GetPid() == runtime.NamespaceMode_NODE {
++		opts = append(opts, oci.WithHostNamespace(runtimespec.PIDNamespace))
++	} else if namespaces.GetPid() != runtime.NamespaceMode_CONTAINER {
+ 		opts = append(opts, oci.WithLinuxNamespace(runtimespec.LinuxNamespace{Type: runtimespec.PIDNamespace, Path: GetPIDNamespace(targetPid)}))
+ 	}
+ 
+diff --git a/plugins/services/introspection/pidns_linux.go b/plugins/services/introspection/pidns_linux.go
+index 4dce1a5..958a9ad 100644
+--- a/plugins/services/introspection/pidns_linux.go
++++ b/plugins/services/introspection/pidns_linux.go
+@@ -25,6 +25,11 @@ import (
+ func statPIDNS(pid int) (uint64, error) {
+ 	f := fmt.Sprintf("/proc/%d/ns/pid", pid)
+ 	st, err := os.Stat(f)
++	// Kernels without PID namespaces may not expose this procfs entry.
++	// Keep the namespace identifier unspecified in that case.
++	if os.IsNotExist(err) {
++		return 0, nil
++	}
+ 	if err != nil {
+ 		return 0, err
+ 	}

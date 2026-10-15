@@ -1,0 +1,23 @@
+From: SDSAT contributors
+Subject: [PATCH] kubelet: tolerate absent tunables only when modifying defaults
+
+Kernels implementing a subset of the Linux sysctl interface may not expose
+every tunable kubelet normally configures. In the default modification mode,
+warn and skip only parameters whose initial read returns ENOENT. Preserve
+strict validation when protectKernelDefaults is enabled, and preserve all
+other read errors and all write failures.
+
+diff --git a/pkg/kubelet/cm/container_manager_linux.go b/pkg/kubelet/cm/container_manager_linux.go
+--- a/pkg/kubelet/cm/container_manager_linux.go
++++ b/pkg/kubelet/cm/container_manager_linux.go
+@@ -484,6 +484,10 @@ func setupKernelTunables(logger klog.Logger, option KernelTunableBehavior) error {
+ 	for flag, expectedValue := range desiredState {
+ 		val, err := sysctl.GetSysctl(flag)
+ 		if err != nil {
++			if option == KernelTunableModify && os.IsNotExist(err) {
++				klog.Warningf("Skipping unavailable kernel tunable %q: %v", flag, err)
++				continue
++			}
+ 			errList = append(errList, err)
+ 			continue
+ 		}

@@ -1,0 +1,34 @@
+version = 3
+root = "/var/lib/forge-kubernetes/containerd"
+state = "/run/containerd"
+
+[grpc]
+address = "/run/containerd/containerd.sock"
+
+[plugins."io.containerd.cri.v1.images"]
+snapshotter = "native"
+use_local_image_pull = true
+
+[plugins."io.containerd.cri.v1.images".pinned_images]
+sandbox = "localhost/forge/busybox:local"
+
+[plugins."io.containerd.cri.v1.runtime"]
+# Restored by packages/containerd/patches for the Asterinas demo.
+disable_cgroup = true
+disable_apparmor = true
+enable_selinux = false
+enable_unprivileged_ports = false
+enable_unprivileged_icmp = false
+
+[plugins."io.containerd.cri.v1.runtime".containerd]
+default_runtime_name = "runc"
+
+[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runc]
+runtime_type = "io.containerd.runc.v2"
+snapshotter = "native"
+
+[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runc.options]
+BinaryName = "/usr/bin/runc"
+NoPivotRoot = true
+NoNewKeyring = true
+SystemdCgroup = false

@@ -1,6 +1,0 @@
-schema = 1
-name = "spacemit_muse_pi_pro"
-board = "spacemit/muse-pi-pro"
-profile = "linux-busybox"
-packages = ["rustsbi", "uboot", "linux", "busybox", "spacemit-esos"]
-lock = "locks/spacemit_muse_pi_pro.lock.toml"

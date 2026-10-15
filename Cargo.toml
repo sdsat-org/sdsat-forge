@@ -25,3 +25,7 @@ gptman = { version = "3", default-features = false }
 vm-fdt = "0.3"
 crc32fast = "1.5"
 fatfs = { version = "0.3", default-features = false, features = ["std", "alloc"] }
+
+# The CLI hashes large images even during development.
+[profile.dev.package.sha2]
+opt-level = 3

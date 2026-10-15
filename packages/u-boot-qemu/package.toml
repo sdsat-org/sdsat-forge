@@ -1,0 +1,23 @@
+schema = 1
+name = "u-boot-qemu"
+backend = "prebuilt"
+source = "u-boot-qemu"
+artifact = "u-boot.bin"
+extract = false
+inputs = ["packages/u-boot-qemu/NOTICE"]
+
+[prebuilt]
+member = "u-boot/qemu-riscv64_smode/u-boot.bin"
+
+[extra_sources]
+source = "u-boot-qemu-source"
+license = "u-boot-qemu-license"
+apkbuild = "u-boot-qemu-apkbuild"
+patch = "u-boot-qemu-patch"
+
+[artifacts]
+"${extra.source}" = "u-boot-qemu-source.tar.bz2"
+"${extra.license}" = "LICENSE.u-boot-qemu"
+"${extra.apkbuild}" = "u-boot-qemu.APKBUILD"
+"${extra.patch}" = "u-boot-qemu-fix-tools-build.patch"
+"${root}/packages/u-boot-qemu/NOTICE" = "NOTICE.u-boot-qemu"

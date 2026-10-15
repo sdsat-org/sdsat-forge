@@ -7,7 +7,7 @@ source = "rustsbi"
 artifact = "rustsbi.elf"
 
 target = "riscv64gc-unknown-none-elf"
-build_output = "${work}/target/${target}/release/rustsbi-prototyper-dynamic.elf"
+build_output = "${source}/target/${target}/release/rustsbi-prototyper-dynamic.elf"
 host_tools = ["rust-objcopy"]
 rust_components = ["rust-src", "llvm-tools-preview"]
 args = ["prototyper", "build", "--config-file", "${config}", "--target", "${target}", "dynamic"]
@@ -16,7 +16,7 @@ args = ["prototyper", "build", "--config-file", "${config}", "--target", "${targ
 cwd = "${source}"
 
 [cargo.env]
-CARGO_TARGET_DIR = "${work}/target"
+CARGO_TARGET_DIR = "${source}/target"
 
 [[cargo_tools]]
 name = "cargo-binutils"

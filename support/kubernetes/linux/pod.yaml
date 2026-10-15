@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: forge-busybox
+  namespace: default
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  dnsPolicy: Default
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: busybox
+      image: localhost/forge/busybox:local
+      imagePullPolicy: Never
+      env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      command: ["/bin/busybox", "sh", "-ec"]
+      args:
+        - |
+          test "$(/bin/busybox uname -m)" = riscv64
+          case "$POD_IP" in
+            10.244.0.*) ;;
+            *) echo "Unexpected Pod IP: $POD_IP" >&2; exit 1 ;;
+          esac
+          test "$POD_IP" != '__SERVER_IP__'
+          /bin/busybox wget -q -T 15 -O /tmp/response 'http://__SERVER_IP__:8080/'
+          /bin/busybox grep -qx FORGE_CNI_HTTP_OK /tmp/response
+          printf 'FORGE_KUBERNETES_POD_OK\narchitecture=riscv64\nFORGE_CNI_NETWORK_OK\n'
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]

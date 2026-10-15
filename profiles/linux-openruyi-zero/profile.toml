@@ -1,21 +1,73 @@
 schema = 1
 toolchain = "nightly-2026-07-21"
 firmware = "rustsbi"
-bootloader = "uboot"
+bootloader = "u-boot-qemu"
 kernel = "linux"
+
+[rootfs_files]
+"usr/bin/kubernetes-start" = { package = "kubernetes", artifact = "kubernetes-linux-start.sh", mode = 0o755 }
+"etc/forge/boot-check.d/kubernetes.sh" = { package = "kubernetes", artifact = "kubernetes-linux-check.sh", mode = 0o755 }
+"etc/kubernetes/forge/start.sh" = { package = "kubernetes", artifact = "kubernetes-start.sh", mode = 0o755 }
+"etc/kubernetes/forge/check.sh" = { package = "kubernetes", artifact = "kubernetes-linux-check.sh", mode = 0o755 }
+"etc/kubernetes/forge/make-image.sh" = { package = "kubernetes", artifact = "kubernetes-make-image.sh", mode = 0o755 }
+"etc/kubernetes/forge/containerd.toml" = { package = "kubernetes", artifact = "kubernetes-linux-containerd.toml" }
+"etc/kubernetes/forge/kubelet.yaml" = { package = "kubernetes", artifact = "kubernetes-kubelet.yaml" }
+"etc/kubernetes/forge/pod.yaml" = { package = "kubernetes", artifact = "kubernetes-linux-pod.yaml" }
+"etc/kubernetes/forge/server.yaml" = { package = "kubernetes", artifact = "kubernetes-linux-server.yaml" }
+"etc/cni/net.d/10-forge.conflist" = { package = "kubernetes", artifact = "kubernetes-cni.conflist" }
+"opt/cni/bin/bridge" = { package = "cni-plugins", artifact = "bridge", mode = 0o755 }
+"opt/cni/bin/host-local" = { package = "cni-plugins", artifact = "host-local", mode = 0o755 }
+"opt/cni/bin/loopback" = { package = "cni-plugins", artifact = "loopback", mode = 0o755 }
+"usr/share/licenses/cni-plugins/LICENSE" = { package = "cni-plugins", artifact = "LICENSE.cni-plugins" }
+"usr/share/licenses/cni-plugins/NOTICE" = { package = "cni-plugins", artifact = "NOTICE.cni-plugins" }
+"usr/share/licenses/cni-plugins/THIRD_PARTY_LICENSES.txt" = { package = "cni-plugins", artifact = "THIRD_PARTY_LICENSES.cni-plugins.txt" }
+"usr/libexec/tianzhi/busybox" = { package = "busybox", artifact = "busybox.elf", mode = 0o755 }
+"usr/bin/containerd" = { package = "containerd", artifact = "containerd", mode = 0o755 }
+"usr/bin/containerd-shim-runc-v2" = { package = "containerd", artifact = "containerd-shim-runc-v2", mode = 0o755 }
+"usr/bin/ctr" = { package = "containerd", artifact = "ctr", mode = 0o755 }
+"usr/bin/runc" = { package = "runc-linux", artifact = "runc", mode = 0o755 }
+"usr/share/licenses/containerd/LICENSE" = { package = "containerd", artifact = "LICENSE.containerd" }
+"usr/share/licenses/containerd/NOTICE" = { package = "containerd", artifact = "NOTICE.containerd" }
+"usr/share/licenses/containerd/THIRD_PARTY_LICENSES.txt" = { package = "containerd", artifact = "THIRD_PARTY_LICENSES.containerd.txt" }
+"usr/share/licenses/runc/LICENSE" = { package = "runc-linux", artifact = "LICENSE.runc" }
+"usr/share/licenses/runc/LICENSE.libseccomp" = { package = "runc-linux", artifact = "LICENSE.libseccomp" }
+"usr/share/licenses/runc/NOTICE" = { package = "runc-linux", artifact = "NOTICE.runc" }
+"usr/share/licenses/runc/runc-source.tar.xz" = { package = "runc-linux", artifact = "runc-source.tar.xz" }
+"usr/share/licenses/runc/libseccomp-source.tar.gz" = { package = "runc-linux", artifact = "libseccomp-source.tar.gz" }
+"usr/bin/etcd" = { package = "etcd", artifact = "etcd", mode = 0o755 }
+"usr/bin/etcdctl" = { package = "etcd", artifact = "etcdctl", mode = 0o755 }
+"usr/share/licenses/etcd/LICENSE" = { package = "etcd", artifact = "LICENSE.etcd" }
+"usr/share/licenses/etcd/NOTICE" = { package = "etcd", artifact = "NOTICE.etcd" }
+"usr/share/licenses/etcd/THIRD_PARTY_LICENSES.txt" = { package = "etcd", artifact = "THIRD_PARTY_LICENSES.etcd.txt" }
+"usr/bin/kubeadm" = { package = "kubernetes", artifact = "kubeadm", mode = 0o755 }
+"usr/bin/kubectl" = { package = "kubernetes", artifact = "kubectl", mode = 0o755 }
+"usr/bin/kube-apiserver" = { package = "kubernetes", artifact = "kube-apiserver", mode = 0o755 }
+"usr/bin/kube-controller-manager" = { package = "kubernetes", artifact = "kube-controller-manager", mode = 0o755 }
+"usr/bin/kube-scheduler" = { package = "kubernetes", artifact = "kube-scheduler", mode = 0o755 }
+"usr/bin/kubelet" = { package = "kubernetes", artifact = "kubelet", mode = 0o755 }
+"usr/bin/kube-proxy" = { package = "kubernetes", artifact = "kube-proxy", mode = 0o755 }
+"usr/share/licenses/kubernetes/LICENSE" = { package = "kubernetes", artifact = "kubernetes-LICENSE" }
+"usr/share/licenses/kubernetes/NOTICE" = { package = "kubernetes", artifact = "NOTICE.kubernetes" }
+"usr/share/licenses/kubernetes/THIRD_PARTY_LICENSES.txt" = { package = "kubernetes", artifact = "THIRD_PARTY_LICENSES.kubernetes.txt" }
 
 [rootfs]
 kind = "prebuilt"
 package = "openruyi-zero"
+gzip_overlay = true
 
 [rootfs.scripts]
-"forge-boot-check.sh" = "support/openruyi-zero/boot-check.sh"
-"forge-userspace-check.sh" = "support/busybox/boot-check.sh"
+"usr/libexec/tianzhi/init" = "support/openruyi-zero/init.sh"
+"usr/libexec/tianzhi/boot-check" = "support/openruyi-zero/boot-check.sh"
+"usr/libexec/tianzhi/userspace-check" = "support/busybox/boot-check.sh"
 
 [boot]
-append = "loglevel=4 console=ttyS0"
-test_append = "rdinit=/forge-boot-check.sh"
+append = "loglevel=4 console=ttyS0 rdinit=/usr/libexec/tianzhi/init"
+test_append = "rdinit=/usr/libexec/tianzhi/boot-check"
+script = '''
+fdt move ${fdtcontroladdr} ${fdt_addr_r} && setenv fdt_addr ${fdt_addr_r} && sysboot ${devtype} ${devnum}:${distro_bootpart} any ${pxefile_addr_r} /boot/extlinux.conf
+'''
 # RVA23 CPU models need PMP enabled for machine-mode SBI firmware.
 cpu = "rva23s64,pmp=true"
 memory = "4G"
 smp = 2
+qemu_args = ["-netdev", "user,id=net0,restrict=on", "-device", "virtio-net-device,netdev=net0"]

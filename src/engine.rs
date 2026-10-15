@@ -137,7 +137,13 @@ impl Build {
         ensure!(profile.schema == 1, "unsupported profile schema");
         let sources = source::load_lock(&config::input_path(&root, &preset.lock)?)?;
         let recipes = config::recipes(&root, &preset, &board)?;
-        for (path, file) in &board.rootfs_files {
+        let mut rootfs_paths = BTreeSet::new();
+        for (path, file) in board.rootfs_files.iter().chain(&profile.rootfs_files) {
+            ensure!(
+                rootfs_paths.insert(path),
+                "duplicate rootfs destination {path}"
+            );
+            ensure!(file.mode() <= 0o777, "invalid rootfs mode for {path}");
             for part in path.split('/') {
                 config::validate_filename(part)?;
             }
@@ -228,7 +234,9 @@ impl Build {
             }
             Rootfs::Prebuilt { scripts, .. } => {
                 for (name, path) in scripts {
-                    config::validate_filename(name)?;
+                    for part in name.split('/') {
+                        config::validate_filename(part)?;
+                    }
                     config::input_path(&root, path)?;
                 }
             }
@@ -299,6 +307,7 @@ impl Build {
     pub fn rust_targets(&self) -> Vec<&str> {
         self.recipes
             .values()
+            .filter(|r| r.backend == "cargo")
             .filter_map(|r| r.target.as_deref())
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -318,6 +327,12 @@ impl Build {
         self.recipes
             .values()
             .flat_map(|r| r.host_tools.iter().map(String::as_str))
+            .chain(
+                self.recipes
+                    .values()
+                    .any(|r| r.backend == "go")
+                    .then_some("go"),
+            )
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect()
@@ -332,10 +347,27 @@ impl Build {
             .collect()
     }
 
+    pub fn go_toolchains(&self) -> BTreeSet<&str> {
+        self.recipes
+            .values()
+            .filter_map(|recipe| {
+                recipe
+                    .go
+                    .as_ref()?
+                    .env
+                    .get("GOTOOLCHAIN")
+                    .map(String::as_str)
+            })
+            .collect()
+    }
+
     pub fn check_host(&self) -> Result<()> {
         for recipe in self.recipes.values() {
             if recipe.backend == "kbuild" {
                 crate::backend::kbuild::check_host(recipe)?;
+            }
+            if recipe.backend == "go" {
+                crate::backend::go::check_host(recipe)?;
             }
         }
         Ok(())
@@ -446,9 +478,13 @@ impl Build {
         let recipe = &self.recipes[name];
         data.extend_from_slice(include_bytes!("config.rs"));
         data.extend_from_slice(include_bytes!("process.rs"));
+        data.extend_from_slice(include_bytes!("remote.rs"));
         data.extend_from_slice(include_bytes!("source.rs"));
         data.extend_from_slice(include_bytes!("backend/mod.rs"));
         data.extend_from_slice(include_bytes!("backend/cargo.rs"));
+        if recipe.backend == "go" {
+            data.extend_from_slice(include_bytes!("backend/go.rs"));
+        }
         if recipe.backend == "kbuild" {
             data.extend_from_slice(include_bytes!("backend/kbuild.rs"));
         }
@@ -485,7 +521,31 @@ impl Build {
         self.build_inner(package, force)
     }
 
+    pub fn remote_outputs(&self, package: Option<&str>) -> Result<Vec<String>> {
+        let mut paths = BTreeSet::from([".config.toml".to_owned()]);
+        for name in self.order(package)? {
+            let recipe = &self.recipes[&name];
+            paths.insert(format!("state/{name}.json"));
+            for artifact in std::iter::once(&recipe.artifact).chain(recipe.artifacts.values()) {
+                paths.insert(format!("images/{artifact}"));
+            }
+        }
+        if package.is_none() {
+            paths.extend(
+                self.system_artifacts()
+                    .iter()
+                    .map(|name| format!("images/{name}")),
+            );
+            paths.insert("manifests/build.json".into());
+            paths.insert("resolved.lock.toml".into());
+        }
+        Ok(paths.into_iter().collect())
+    }
+
     fn build_inner(&self, package: Option<&str>, force: bool) -> Result<()> {
+        if crate::remote::host()?.is_some() {
+            return self.build_remote(package, force);
+        }
         let order = self.order(package)?;
         for dir in ["build", "images", "logs", "state", "manifests"] {
             safe_directory(&self.root, &self.output.join(dir))?;
@@ -542,6 +602,18 @@ impl Build {
                     &work,
                 )?,
                 "cargo" => crate::backend::cargo::build(recipe, &variables)?,
+                "go" => crate::backend::go::build(
+                    recipe,
+                    &variables,
+                    recipe
+                        .toolchain
+                        .as_ref()
+                        .map(|name| {
+                            source::fetch(&self.sources.sources[name], &self.root.join("dl"))
+                        })
+                        .transpose()?
+                        .as_deref(),
+                )?,
                 "prebuilt" => crate::backend::prebuilt::build(recipe, &source, &variables)?,
                 _ => unreachable!("validated backend"),
             };
@@ -607,6 +679,108 @@ impl Build {
         Ok(())
     }
 
+    fn build_remote(&self, package: Option<&str>, force: bool) -> Result<()> {
+        let order = self.order(package)?;
+        let action = if force { "rebuild" } else { "build" };
+        let downloaded = crate::remote::run(self, action, package)?;
+        let result = self.import_remote(&downloaded, &order, package.is_none());
+        // The transport returns a freshly allocated directory under this output.
+        let resolved = downloaded.canonicalize()?;
+        ensure!(
+            resolved.parent() == Some(self.output.canonicalize()?.as_path())
+                && resolved
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("remote-result-")),
+            "refusing to remove unexpected remote result directory"
+        );
+        fs::remove_dir_all(&resolved)?;
+        result
+    }
+
+    fn import_remote(&self, downloaded: &Path, order: &[String], complete: bool) -> Result<()> {
+        let mut expected = BTreeMap::new();
+        let mut states = Vec::new();
+        for name in order {
+            let state: State =
+                serde_json::from_slice(&fs::read(downloaded.join(format!("state/{name}.json")))?)?;
+            let recipe = &self.recipes[name];
+            for artifact in std::iter::once(&recipe.artifact).chain(recipe.artifacts.values()) {
+                let checksum = state
+                    .artifacts
+                    .get(artifact)
+                    .context("remote state lacks artifact checksum")?;
+                expected.insert(artifact.clone(), checksum.clone());
+            }
+            states.push((name, state));
+        }
+        if complete {
+            let manifest: Manifest =
+                serde_json::from_slice(&fs::read(downloaded.join("manifests/build.json"))?)?;
+            ensure!(
+                manifest.inputs == self.inputs_digest()?,
+                "remote configuration differs from local inputs"
+            );
+            for name in self.system_artifacts() {
+                let checksum = manifest
+                    .artifacts
+                    .get(name)
+                    .context("remote manifest lacks artifact checksum")?;
+                if let Some(previous) = expected.insert(name.into(), checksum.clone()) {
+                    ensure!(
+                        previous == *checksum,
+                        "conflicting remote checksum for {name}"
+                    );
+                }
+            }
+        }
+        // Verify every result before publishing any local artifact.
+        for (name, checksum) in &expected {
+            ensure!(
+                digest_file(&downloaded.join("images").join(name))? == *checksum,
+                "remote artifact checksum mismatch: {name}"
+            );
+        }
+        for dir in ["images", "state", "manifests"] {
+            safe_directory(&self.root, &self.output.join(dir))?;
+        }
+        let manifest = self.output.join("manifests/build.json");
+        if manifest.exists() {
+            fs::remove_file(&manifest)?;
+        }
+        for name in expected.keys() {
+            publish(
+                &self.output.join("images").join(name),
+                &fs::read(downloaded.join("images").join(name))?,
+            )?;
+        }
+        for (name, state) in states {
+            // Keep the Linux fingerprint: switching to a local builder must not
+            // accidentally reuse a package compiled with different host tools.
+            publish(
+                &self.output.join(format!("state/{name}.json")),
+                &serde_json::to_vec(&state)?,
+            )?;
+        }
+        publish(
+            &self.output.join(".config.toml"),
+            toml::to_string_pretty(&self.preset)?.as_bytes(),
+        )?;
+        if complete {
+            publish(
+                &self.output.join("resolved.lock.toml"),
+                toml::to_string_pretty(&self.sources)?.as_bytes(),
+            )?;
+            publish(
+                &manifest,
+                &serde_json::to_vec_pretty(&Manifest {
+                    inputs: self.inputs_digest()?,
+                    artifacts: expected,
+                })?,
+            )?;
+        }
+        Ok(())
+    }
+
     fn build_variables(
         &self,
         recipe: &Recipe,
@@ -650,6 +824,21 @@ impl Build {
 
     fn initramfs(&self) -> Result<()> {
         let output = self.output.join("images/initramfs.cpio");
+        let files = self
+            .board
+            .rootfs_files
+            .iter()
+            .chain(&self.profile.rootfs_files)
+            .map(|(path, file)| {
+                (
+                    path.clone(),
+                    self.output
+                        .join("images")
+                        .join(file.artifact(&self.recipes[file.package()])),
+                    file.mode(),
+                )
+            })
+            .collect::<Vec<_>>();
         match &self.profile.rootfs {
             Rootfs::Busybox { package, init } => {
                 let init = config::input_path(&self.root, init)?;
@@ -657,32 +846,24 @@ impl Build {
                     &self.artifact(package),
                     &init.join("init"),
                     &init.join("boot-check.sh"),
+                    &files,
                     &output,
                 )
             }
-            Rootfs::Prebuilt { package, scripts } => {
+            Rootfs::Prebuilt {
+                package,
+                scripts,
+                gzip_overlay,
+            } => {
                 fs::copy(self.artifact(package), &output)?;
                 let scripts = scripts
                     .iter()
                     .map(|(name, path)| Ok((name.as_str(), config::input_path(&self.root, path)?)))
                     .collect::<Result<Vec<_>>>()?;
-                image::append_scripts(&output, &scripts)
+                image::append_scripts(&output, &scripts)?;
+                image::append_files(&output, &files, *gzip_overlay)
             }
-        }?;
-        let files = self
-            .board
-            .rootfs_files
-            .iter()
-            .map(|(path, file)| {
-                (
-                    path.clone(),
-                    self.output
-                        .join("images")
-                        .join(file.artifact(&self.recipes[file.package()])),
-                )
-            })
-            .collect::<Vec<_>>();
-        image::append_files(&output, &files)
+        }
     }
 
     fn inputs_digest(&self) -> Result<String> {
@@ -707,6 +888,7 @@ impl Build {
             }
         }
         data.extend_from_slice(include_bytes!("image.rs"));
+        data.extend_from_slice(include_bytes!("remote.rs"));
         data.extend_from_slice(include_bytes!("image/spacemit_k1.rs"));
         data.extend_from_slice(include_bytes!("engine.rs"));
         data.extend_from_slice(include_bytes!("config.rs"));
@@ -714,6 +896,7 @@ impl Build {
         data.extend_from_slice(include_bytes!("backend/cargo.rs"));
         data.extend_from_slice(include_bytes!("backend/kbuild.rs"));
         data.extend_from_slice(include_bytes!("backend/prebuilt.rs"));
+        data.extend_from_slice(include_bytes!("backend/go.rs"));
         for name in self.recipes.keys() {
             if let Some(path) = &self.recipes[name].config {
                 data.extend(fs::read(config::input_path(&self.root, path)?)?);
@@ -755,13 +938,6 @@ impl Build {
             manifest.inputs == self.inputs_digest()?,
             "configuration changed; run forge build"
         );
-        for name in self.system_artifacts() {
-            ensure!(
-                manifest.artifacts.get(name)
-                    == Some(&digest_file(&self.output.join("images").join(name))?),
-                "artifact {name} changed; run forge build"
-            );
-        }
         let options = QemuOptions {
             program: qemu.unwrap_or(&q.program).into(),
             machine: q.machine.clone(),
@@ -778,6 +954,8 @@ impl Build {
                 .clone()
                 .unwrap_or_else(|| q.memory.clone()),
             smp: self.profile.boot.smp.unwrap_or(q.smp),
+            args: self.profile.boot.qemu_args.clone(),
+            boot_script: self.profile.boot.script.as_deref(),
             append: if timeout.is_some() {
                 format!(
                     "{} {}",

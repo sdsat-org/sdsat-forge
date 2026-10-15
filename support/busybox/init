@@ -13,8 +13,12 @@ mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 cd /root
 
+if [ -f /etc/init.d/rcS ]; then
+    /bin/sh /etc/init.d/rcS
+fi
+
 if [ "${1:-}" = --forge-test ]; then
-    /bin/sh /boot-check.sh
+    /bin/sh /usr/libexec/tianzhi/boot-check
     echo FORGE_BOOT_OK
     /bin/busybox poweroff -f
     echo 'Poweroff returned without stopping the system.' >&2

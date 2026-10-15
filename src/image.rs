@@ -3,6 +3,8 @@
 pub mod spacemit_k1;
 
 use anyhow::{Context, Result, ensure};
+use flate2::{Compression, write::GzEncoder};
+use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -13,7 +15,14 @@ use std::time::{Duration, Instant};
 
 /// Package the BusyBox shell environment without creating host device nodes or
 /// symlinks. Normalize script line endings for Windows source checkouts.
-pub fn create_initramfs(busybox: &Path, init: &Path, check: &Path, output: &Path) -> Result<()> {
+/// Include extra files before the trailer for readers that stop after one archive.
+pub fn create_initramfs(
+    busybox: &Path,
+    init: &Path,
+    check: &Path,
+    files: &[(String, PathBuf, u32)],
+    output: &Path,
+) -> Result<()> {
     let binary = fs::read(busybox).with_context(|| format!("read {}", busybox.display()))?;
     let init = fs::read_to_string(init)
         .with_context(|| format!("read {}", init.display()))?
@@ -22,13 +31,17 @@ pub fn create_initramfs(busybox: &Path, init: &Path, check: &Path, output: &Path
         .with_context(|| format!("read {}", check.display()))?
         .replace("\r\n", "\n");
     let mut archive = Vec::new();
-    for (index, (name, mode, device, data)) in [
+    let mut directories = BTreeSet::new();
+    let mut inode = 1;
+    for (name, mode, device, data) in [
         (".", 0o040755, (0, 0), &[][..]),
         ("bin", 0o040755, (0, 0), &[][..]),
         ("sbin", 0o040755, (0, 0), &[][..]),
         ("usr", 0o040755, (0, 0), &[][..]),
         ("usr/bin", 0o040755, (0, 0), &[][..]),
         ("usr/sbin", 0o040755, (0, 0), &[][..]),
+        ("usr/libexec", 0o040755, (0, 0), &[][..]),
+        ("usr/libexec/tianzhi", 0o040755, (0, 0), &[][..]),
         ("dev", 0o040755, (0, 0), &[][..]),
         ("proc", 0o040755, (0, 0), &[][..]),
         ("sys", 0o040755, (0, 0), &[][..]),
@@ -38,7 +51,12 @@ pub fn create_initramfs(busybox: &Path, init: &Path, check: &Path, output: &Path
         ("bin/busybox", 0o100755, (0, 0), binary.as_slice()),
         ("bin/sh", 0o120777, (0, 0), b"busybox".as_slice()),
         ("init", 0o100755, (0, 0), init.as_bytes()),
-        ("boot-check.sh", 0o100755, (0, 0), check.as_bytes()),
+        (
+            "usr/libexec/tianzhi/boot-check",
+            0o100755,
+            (0, 0),
+            check.as_bytes(),
+        ),
         (
             "etc/passwd",
             0o100644,
@@ -48,13 +66,15 @@ pub fn create_initramfs(busybox: &Path, init: &Path, check: &Path, output: &Path
         ("etc/group", 0o100644, (0, 0), b"root:x:0:\n".as_slice()),
         ("dev/console", 0o020600, (5, 1), &[][..]),
         ("dev/null", 0o020666, (1, 3), &[][..]),
-        ("TRAILER!!!", 0, (0, 0), &[][..]),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        append_entry(&mut archive, index as u32 + 1, name, mode, device, data)?;
+    ] {
+        if mode & 0o170000 == 0o040000 {
+            directories.insert(name.to_owned());
+        }
+        append_entry(&mut archive, inode, name, mode, device, data)?;
+        inode += 1;
     }
+    append_file_entries(&mut archive, files, &mut directories, &mut inode)?;
+    append_entry(&mut archive, inode, "TRAILER!!!", 0, (0, 0), &[])?;
     pad(&mut archive, 512);
     if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
@@ -69,60 +89,97 @@ pub fn append_scripts(output: &Path, scripts: &[(&str, PathBuf)]) -> Result<()> 
         return Ok(());
     }
     let mut archive = Vec::new();
-    for (index, (name, path)) in scripts.iter().enumerate() {
-        crate::config::validate_filename(name)?;
+    let mut directories = BTreeSet::new();
+    let mut inode = 1;
+    for (name, path) in scripts {
+        append_parent_directories(&mut archive, name, &mut directories, &mut inode)?;
         let script = fs::read_to_string(path)?.replace("\r\n", "\n");
         append_entry(
             &mut archive,
-            index as u32 + 1,
+            inode,
             name,
             0o100755,
             (0, 0),
             script.as_bytes(),
         )?;
+        inode += 1;
     }
-    append_archive(output, &mut archive)
+    append_archive(output, &mut archive, false)
 }
 
-pub fn append_files(output: &Path, files: &[(String, PathBuf)]) -> Result<()> {
+/// Append another newc archive to a prebuilt rootfs, retaining its existing bytes.
+pub fn append_files(
+    output: &Path,
+    files: &[(String, PathBuf, u32)],
+    gzip_overlay: bool,
+) -> Result<()> {
     if files.is_empty() {
         return Ok(());
     }
     let mut archive = Vec::new();
-    let mut directories = std::collections::BTreeSet::new();
-    for (index, (name, path)) in files.iter().enumerate() {
-        let mut directory = String::new();
-        let parts = name.split('/').collect::<Vec<_>>();
-        for part in &parts {
-            crate::config::validate_filename(part)?;
-        }
-        for part in &parts[..parts.len() - 1] {
-            directory.push_str(part);
-            if directories.insert(directory.clone()) {
-                append_entry(&mut archive, 0, &directory, 0o040755, (0, 0), &[])?;
-            }
-            directory.push('/');
-        }
-        append_entry(
-            &mut archive,
-            index as u32 + 1,
-            name,
-            0o100644,
-            (0, 0),
-            &fs::read(path)?,
-        )?;
-    }
-    append_archive(output, &mut archive)
+    let mut directories = BTreeSet::new();
+    let mut inode = 1;
+    append_file_entries(&mut archive, files, &mut directories, &mut inode)?;
+    append_archive(output, &mut archive, gzip_overlay)
 }
 
-fn append_archive(output: &Path, archive: &mut Vec<u8>) -> Result<()> {
+fn append_file_entries(
+    archive: &mut Vec<u8>,
+    files: &[(String, PathBuf, u32)],
+    directories: &mut BTreeSet<String>,
+    inode: &mut u32,
+) -> Result<()> {
+    for (name, path, mode) in files {
+        append_parent_directories(archive, name, directories, inode)?;
+        append_entry(
+            archive,
+            *inode,
+            name,
+            0o100000 | (mode & 0o777),
+            (0, 0),
+            &fs::read(path).with_context(|| format!("read rootfs file {}", path.display()))?,
+        )?;
+        *inode += 1;
+    }
+    Ok(())
+}
+
+fn append_parent_directories(
+    archive: &mut Vec<u8>,
+    name: &str,
+    directories: &mut BTreeSet<String>,
+    inode: &mut u32,
+) -> Result<()> {
+    let parts = name.split('/').collect::<Vec<_>>();
+    for part in &parts {
+        crate::config::validate_filename(part)?;
+    }
+    let mut directory = String::new();
+    for part in &parts[..parts.len() - 1] {
+        directory.push_str(part);
+        if directories.insert(directory.clone()) {
+            append_entry(archive, *inode, &directory, 0o040755, (0, 0), &[])?;
+            *inode += 1;
+        }
+        directory.push('/');
+    }
+    Ok(())
+}
+
+fn append_archive(output: &Path, archive: &mut Vec<u8>, gzip: bool) -> Result<()> {
     append_entry(archive, 0, "TRAILER!!!", 0, (0, 0), &[])?;
     pad(archive, 512);
     let mut file = fs::OpenOptions::new().append(true).open(output)?;
     // Each uncompressed newc member starts at a four-byte boundary.
     let padding = (4 - file.metadata()?.len() % 4) % 4;
     file.write_all(&[0; 3][..padding as usize])?;
-    file.write_all(archive)?;
+    if gzip {
+        let mut encoder = GzEncoder::new(file, Compression::fast());
+        encoder.write_all(archive)?;
+        encoder.finish()?;
+    } else {
+        file.write_all(archive)?;
+    }
     Ok(())
 }
 
@@ -169,19 +226,21 @@ fn pad(bytes: &mut Vec<u8>, alignment: usize) {
 }
 
 #[derive(Debug, Clone)]
-pub struct QemuOptions {
+pub struct QemuOptions<'a> {
     pub program: String,
     pub machine: String,
     pub cpu: String,
     pub memory: String,
     pub smp: u32,
     pub append: String,
+    pub args: Vec<String>,
+    pub boot_script: Option<&'a str>,
 }
 
 /// A timed boot check requires a complete readiness line and successful exit.
 /// Both modes retain stdout/stderr in the log and display output as it arrives.
 pub fn run_qemu(
-    options: &QemuOptions,
+    options: &QemuOptions<'_>,
     firmware: &Path,
     bootloader: Option<&Path>,
     kernel: &Path,
@@ -199,7 +258,7 @@ pub fn run_qemu(
     let log_file = Arc::new(Mutex::new(File::create(log)?));
     // Keep the read-only boot volume alive until QEMU and its log readers exit.
     let boot_files = bootloader
-        .map(|_| boot_directory(kernel, initramfs, &options.append))
+        .map(|_| boot_directory(kernel, initramfs, &options.append, options.boot_script))
         .transpose()?;
     let mut command = Command::new(&options.program);
     command
@@ -241,6 +300,7 @@ pub fn run_qemu(
             .args(["-append", &options.append]);
     }
     let mut child = command
+        .args(&options.args)
         .args(["-nographic", "-no-reboot"])
         .stdin(if timeout.is_some() {
             Stdio::null()
@@ -282,7 +342,12 @@ pub fn run_qemu(
 }
 
 /// Stage an extlinux boot volume without host filesystem tools or symlinks.
-fn boot_directory(kernel: &Path, initramfs: &Path, append: &str) -> Result<tempfile::TempDir> {
+fn boot_directory(
+    kernel: &Path,
+    initramfs: &Path,
+    append: &str,
+    script: Option<&str>,
+) -> Result<tempfile::TempDir> {
     ensure!(
         !append.contains(['\n', '\r']),
         "boot arguments must fit on one line"
@@ -293,14 +358,51 @@ fn boot_directory(kernel: &Path, initramfs: &Path, append: &str) -> Result<tempf
     let root = directory.path();
     fs::copy(kernel, root.join("Image"))?;
     fs::copy(initramfs, root.join("initramfs.cpio"))?;
-    fs::create_dir(root.join("extlinux"))?;
+    // A configured script must run before extlinux, so keep its configuration
+    // outside the paths automatically scanned by U-Boot's distro boot command.
+    let config_directory = if script.is_some() { "boot" } else { "extlinux" };
+    fs::create_dir(root.join(config_directory))?;
     fs::write(
-        root.join("extlinux/extlinux.conf"),
+        root.join(config_directory).join("extlinux.conf"),
         format!(
             "default forge\ntimeout 0\nlabel forge\n  linux /Image\n  initrd /initramfs.cpio\n  append {append}\n"
         ),
     )?;
+    if let Some(script) = script {
+        fs::write(root.join("boot.scr"), uboot_script(script)?)?;
+    }
     Ok(directory)
+}
+
+/// Wrap configured commands in U-Boot's legacy script image format.
+fn uboot_script(script: &str) -> Result<Vec<u8>> {
+    ensure!(
+        !script.trim().is_empty() && !script.contains('\0'),
+        "U-Boot script must contain commands without NUL bytes"
+    );
+    let script = script.replace("\r\n", "\n");
+    let length = u32::try_from(script.len()).context("U-Boot script is too large")?;
+    let mut data = Vec::new();
+    // Script images use a size table terminated by a zero-sized component.
+    data.extend_from_slice(&length.to_be_bytes());
+    data.extend_from_slice(&0u32.to_be_bytes());
+    data.extend_from_slice(script.as_bytes());
+    let mut header = [0u8; 64];
+    header[..4].copy_from_slice(&0x27051956u32.to_be_bytes());
+    header[12..16].copy_from_slice(
+        &u32::try_from(data.len())
+            .context("U-Boot script image is too large")?
+            .to_be_bytes(),
+    );
+    header[24..28].copy_from_slice(&crc32fast::hash(&data).to_be_bytes());
+    // Commands are architecture independent; source only requires type SCRIPT.
+    header[30] = 6;
+    header[32..49].copy_from_slice(b"SDSAT boot script");
+    let header_crc = crc32fast::hash(&header);
+    header[4..8].copy_from_slice(&header_crc.to_be_bytes());
+    let mut image = header.to_vec();
+    image.extend_from_slice(&data);
+    Ok(image)
 }
 
 fn wait_for_exit(child: &mut Child, timeout: Option<Duration>) -> Result<ExitStatus> {

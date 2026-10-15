@@ -56,6 +56,20 @@ fn relative_path(path: &str) -> Result<()> {
     Ok(())
 }
 
+fn ssh_builder_hint() -> &'static str {
+    if cfg!(windows) {
+        "To use a Linux SSH builder, run in this PowerShell session:\n  \
+         $env:FORGE_BUILD_SSH = \"user@linux-host\"\n\
+         An SSH config Host alias is also accepted. The host must be reachable \
+         without interactive prompts (ssh -o BatchMode=yes)."
+    } else {
+        "To use a Linux SSH builder, run in this shell session:\n  \
+         export FORGE_BUILD_SSH='user@linux-host'\n\
+         An SSH config Host alias is also accepted. The host must be reachable \
+         without interactive prompts (ssh -o BatchMode=yes)."
+    }
+}
+
 fn remote_host() -> Result<Option<String>> {
     let Some(host) = std::env::var_os("FORGE_BUILD_SSH") else {
         return Ok(None);
@@ -69,7 +83,8 @@ fn remote_host() -> Result<Option<String>> {
             && host
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"._-@".contains(&b)),
-        "FORGE_BUILD_SSH must be an SSH alias or user@hostname"
+        "FORGE_BUILD_SSH must be an SSH alias or user@hostname.\n{}",
+        ssh_builder_hint()
     );
     Ok(Some(host))
 }
@@ -186,17 +201,16 @@ pub fn check_host(recipe: &Recipe) -> Result<()> {
         command.arg("-c");
         command
     };
-    let result = command.arg(host_script(kbuild)).output().with_context(|| {
-        format!(
-            "checking {} builder; set FORGE_BUILD_SSH to use an SSH builder",
-            recipe.name
-        )
-    })?;
+    let result = command
+        .arg(host_script(kbuild))
+        .output()
+        .with_context(|| format!("checking {} builder\n{}", recipe.name, ssh_builder_hint()))?;
     ensure!(
         result.status.success(),
-        "{} builder requirements were not met (set FORGE_BUILD_SSH to use an SSH builder): {}",
+        "{} builder requirements were not met: {}\n{}",
         recipe.name,
-        String::from_utf8_lossy(&result.stderr).trim()
+        String::from_utf8_lossy(&result.stderr).trim(),
+        ssh_builder_hint()
     );
     println!(
         "[ok] {} builder: {}",

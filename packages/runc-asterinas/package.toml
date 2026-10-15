@@ -1,0 +1,11 @@
+schema = 1
+name = "runc-asterinas"
+backend = "prebuilt"
+source = "runc-asterinas"
+artifact = "runc"
+file = "runc"
+
+[artifacts]
+"${source}/LICENSE" = "LICENSE.runc"
+"${source}/NOTICE" = "NOTICE.runc"
+"${source}/THIRD_PARTY_LICENSES.txt" = "THIRD_PARTY_LICENSES.runc.txt"

@@ -1,7 +1,7 @@
 //! Pinned HTTPS downloads and transactional extraction of single-root tar.gz sources.
 //!
 //! Source snapshots omit top-level `.git`, `.agents`, and `.claude` metadata.
-//! Other archive links retain their normal semantics and require host support.
+//! Windows materializes archive links as copies; other hosts retain link semantics.
 use anyhow::{Context, Result, ensure};
 use flate2::read::GzDecoder;
 use serde::{Deserialize, Serialize};
@@ -150,6 +150,8 @@ pub fn extract(archive: &Path, destination: &Path) -> Result<()> {
     let temporary = tempfile::tempdir_in(parent)?;
     let mut archive = tar::Archive::new(GzDecoder::new(File::open(archive)?));
     let mut root = None;
+    #[cfg(windows)]
+    let mut links = WindowsLinks::default();
     for entry in archive.entries()? {
         let mut entry = entry?;
         if entry.header().entry_type().is_pax_global_extensions() {
@@ -175,6 +177,37 @@ pub fn extract(archive: &Path, destination: &Path) -> Result<()> {
             relative != Path::new(STAMP),
             "source archive uses Forge's reserved stamp filename"
         );
+        #[cfg(windows)]
+        {
+            validate_windows_archive_path(&path, false)?;
+            ensure!(
+                !relative.to_string_lossy().eq_ignore_ascii_case(STAMP),
+                "source archive uses Forge's reserved stamp filename"
+            );
+            let kind = entry.header().entry_type();
+            if kind.is_symlink() || kind.is_hard_link() {
+                let target = entry
+                    .link_name()?
+                    .context("archive link has no target")?
+                    .into_owned();
+                validate_windows_archive_path(&target, kind.is_symlink())?;
+                let target = if kind.is_hard_link() {
+                    target
+                        .strip_prefix(Path::new(top))
+                        .context("archive hard link target is outside its source root")?
+                        .to_path_buf()
+                } else {
+                    target
+                };
+                links.insert(relative, target, kind.is_hard_link())?;
+                continue;
+            }
+            ensure!(
+                kind.is_file() || kind.is_contiguous() || kind.is_dir() || kind.is_gnu_sparse(),
+                "unsupported Windows source archive member: {}",
+                path.display()
+            );
+        }
         ensure!(
             entry.unpack_in(temporary.path())?,
             "archive member escapes its extraction directory: {}",
@@ -188,8 +221,275 @@ pub fn extract(archive: &Path, destination: &Path) -> Result<()> {
         fs::symlink_metadata(&tree)?.is_dir(),
         "source archive root is not a directory"
     );
+    #[cfg(windows)]
+    links.materialize(&tree)?;
     fs::write(tree.join(STAMP), checksum)?;
     fs::rename(&tree, destination)
         .with_context(|| format!("publishing source directory {}", destination.display()))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn validate_windows_archive_path(path: &Path, parents: bool) -> Result<()> {
+    ensure!(!path.as_os_str().is_empty(), "empty archive path");
+    for component in path.components() {
+        match component {
+            Component::CurDir | Component::ParentDir if parents => {}
+            Component::Normal(name) => {
+                let name = name.to_str().context("archive path is not Unicode")?;
+                let stem = name.split('.').next().unwrap_or_default().to_uppercase();
+                let device = matches!(
+                    stem.as_str(),
+                    "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+                ) || ["COM", "LPT"].iter().any(|prefix| {
+                    stem.strip_prefix(prefix).is_some_and(|suffix| {
+                        matches!(
+                            suffix,
+                            "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                        )
+                    })
+                });
+                ensure!(
+                    !device
+                        && !name.ends_with(['.', ' '])
+                        && !name
+                            .chars()
+                            .any(|c| c.is_control() || "<>:\"|?*".contains(c)),
+                    "archive path cannot be represented safely on Windows: {}",
+                    path.display()
+                );
+            }
+            _ => anyhow::bail!("archive path is not relative: {}", path.display()),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+#[derive(Clone)]
+struct WindowsLink {
+    path: PathBuf,
+    target: PathBuf,
+    hard: bool,
+}
+
+#[cfg(windows)]
+#[derive(Default)]
+struct WindowsLinks {
+    entries: BTreeMap<PathBuf, WindowsLink>,
+    active: std::collections::BTreeSet<PathBuf>,
+    complete: std::collections::BTreeSet<PathBuf>,
+}
+
+// Archive paths have already been checked for Windows aliases such as trailing
+// dots and ADS. Fold case as well when identifying links and their ancestors.
+#[cfg(windows)]
+fn windows_path_key(path: &Path) -> PathBuf {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy().to_lowercase())
+        .collect()
+}
+
+#[cfg(windows)]
+impl WindowsLinks {
+    fn insert(&mut self, path: &Path, target: PathBuf, hard: bool) -> Result<()> {
+        ensure!(!path.as_os_str().is_empty(), "source root cannot be a link");
+        ensure!(
+            self.entries
+                .insert(
+                    windows_path_key(path),
+                    WindowsLink {
+                        path: path.to_path_buf(),
+                        target,
+                        hard,
+                    },
+                )
+                .is_none(),
+            "duplicate archive link: {}",
+            path.display()
+        );
+        Ok(())
+    }
+
+    fn materialize(&mut self, tree: &Path) -> Result<()> {
+        // No archive member may live beneath a link: that would make its
+        // meaning depend on extraction order or overwrite a copied target.
+        for (key, link) in &self.entries {
+            ensure!(
+                windows_tree_metadata(tree, &link.path)?.is_none(),
+                "archive link conflicts with another member: {}",
+                link.path.display()
+            );
+            for ancestor in key.ancestors().skip(1) {
+                ensure!(
+                    !self.entries.contains_key(ancestor),
+                    "archive link is nested beneath another link: {}",
+                    link.path.display()
+                );
+            }
+        }
+        for link in self.entries.values() {
+            fs::create_dir_all(tree.join(link.path.parent().unwrap()))?;
+        }
+        for key in self.entries.keys().cloned().collect::<Vec<_>>() {
+            self.materialize_link(tree, &key)?;
+        }
+        Ok(())
+    }
+
+    fn resolve(
+        &self,
+        tree: &Path,
+        key: &Path,
+        active: &mut std::collections::BTreeSet<PathBuf>,
+    ) -> Result<PathBuf> {
+        ensure!(
+            active.insert(key.to_path_buf()),
+            "archive link cycle at {}",
+            key.display()
+        );
+        let link = &self.entries[key];
+        let mut resolved = if link.hard {
+            PathBuf::new()
+        } else {
+            link.path.parent().unwrap().to_path_buf()
+        };
+        for component in link.target.components() {
+            ensure!(
+                windows_tree_metadata(tree, &resolved)?.is_some_and(|m| m.is_dir()),
+                "archive link traverses a missing or non-directory target: {}",
+                link.path.display()
+            );
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    ensure!(
+                        resolved.pop(),
+                        "archive link escapes its source root: {}",
+                        link.path.display()
+                    );
+                }
+                Component::Normal(name) => {
+                    resolved.push(name);
+                    let target_key = windows_path_key(&resolved);
+                    if self.entries.contains_key(&target_key) {
+                        resolved = self.resolve(tree, &target_key, active)?;
+                    }
+                }
+                _ => anyhow::bail!("archive link target is not relative"),
+            }
+        }
+        active.remove(key);
+        Ok(resolved)
+    }
+
+    fn materialize_link(&mut self, tree: &Path, key: &Path) -> Result<()> {
+        if self.complete.contains(key) {
+            return Ok(());
+        }
+        ensure!(
+            self.active.insert(key.to_path_buf()),
+            "archive directory link cycle at {}",
+            key.display()
+        );
+        let link = self.entries[key].clone();
+        let source = self.resolve(tree, key, &mut Default::default())?;
+        let metadata = windows_tree_metadata(tree, &source)?.with_context(|| {
+            format!(
+                "archive link target does not exist: {} -> {}",
+                link.path.display(),
+                source.display()
+            )
+        })?;
+        // Resolve existing Windows aliases (including short names) before
+        // checking which deferred links belong to this directory.
+        let source = fs::canonicalize(tree.join(&source))?
+            .strip_prefix(fs::canonicalize(tree)?)
+            .context("archive link target is outside its source root")?
+            .to_path_buf();
+        ensure!(
+            !link.hard || metadata.is_file(),
+            "archive hard link target is not a file: {}",
+            link.path.display()
+        );
+        if metadata.is_dir() {
+            // Finish links inside the original directory before copying it.
+            // Encountering an active link rejects self-containing directories
+            // and indirect directory cycles before an unbounded copy begins.
+            let source_key = windows_path_key(&source);
+            let children = self
+                .entries
+                .keys()
+                .filter(|path| path.starts_with(&source_key))
+                .cloned()
+                .collect::<Vec<_>>();
+            for child in children {
+                self.materialize_link(tree, &child)?;
+            }
+        }
+        copy_windows_archive_node(tree, &source, &link.path)?;
+        self.active.remove(key);
+        self.complete.insert(key.to_path_buf());
+        Ok(())
+    }
+}
+
+/// Check every ancestor without following Windows symlinks or junctions.
+#[cfg(windows)]
+fn windows_tree_metadata(tree: &Path, relative: &Path) -> Result<Option<fs::Metadata>> {
+    use std::os::windows::fs::MetadataExt;
+    let mut path = tree.to_path_buf();
+    let mut metadata = fs::symlink_metadata(&path)?;
+    let mut components = relative.components();
+    loop {
+        ensure!(
+            metadata.file_attributes() & 0x400 == 0,
+            "archive path is a Windows reparse point: {}",
+            path.display()
+        );
+        let Some(component) = components.next() else {
+            return Ok(Some(metadata));
+        };
+        ensure!(
+            metadata.is_dir(),
+            "archive path parent is not a directory: {}",
+            path.display()
+        );
+        ensure!(
+            matches!(component, Component::Normal(_)),
+            "archive path is not relative"
+        );
+        path.push(component.as_os_str());
+        metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+    }
+}
+
+#[cfg(windows)]
+fn copy_windows_archive_node(tree: &Path, source: &Path, destination: &Path) -> Result<()> {
+    let metadata =
+        windows_tree_metadata(tree, source)?.context("archive link target is missing")?;
+    ensure!(
+        windows_tree_metadata(tree, destination)?.is_none(),
+        "archive link destination already exists: {}",
+        destination.display()
+    );
+    if metadata.is_dir() {
+        fs::create_dir(tree.join(destination))?;
+        for entry in fs::read_dir(tree.join(source))? {
+            let name = entry?.file_name();
+            copy_windows_archive_node(tree, &source.join(&name), &destination.join(&name))?;
+        }
+    } else {
+        ensure!(
+            metadata.is_file(),
+            "archive link target is not a file or directory: {}",
+            source.display()
+        );
+        fs::copy(tree.join(source), tree.join(destination))?;
+    }
     Ok(())
 }

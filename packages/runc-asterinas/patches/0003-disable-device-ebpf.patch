@@ -1,0 +1,41 @@
+From 49cb01650a0ef7485e55a34438b81eb9f3043966 Mon Sep 17 00:00:00 2001
+From: jiangjianfeng <jiangjianfeng.jjf@antgroup.com>
+Date: Mon, 27 Jul 2026 21:54:00 +0800
+Subject: [PATCH] runc: Disable eBPF for device filtering
+
+---
+ .../github.com/opencontainers/cgroups/devices/v2.go  | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/vendor/github.com/opencontainers/cgroups/devices/v2.go b/vendor/github.com/opencontainers/cgroups/devices/v2.go
+index d54298f..8fedabb 100644
+--- a/vendor/github.com/opencontainers/cgroups/devices/v2.go
++++ b/vendor/github.com/opencontainers/cgroups/devices/v2.go
+@@ -55,7 +55,7 @@ func setV2(dirPath string, r *cgroups.Resources) error {
+ 	if r.SkipDevices {
+ 		return nil
+ 	}
+-	insts, license, err := deviceFilter(r.Devices)
++	_, _, err := deviceFilter(r.Devices)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -64,10 +64,10 @@ func setV2(dirPath string, r *cgroups.Resources) error {
+ 		return fmt.Errorf("cannot get dir FD for %s", dirPath)
+ 	}
+ 	defer unix.Close(dirFD)
+-	if _, err := loadAttachCgroupDeviceFilter(insts, license, dirFD); err != nil {
+-		if !canSkipEBPFError(r) {
+-			return err
+-		}
+-	}
++	// if _, err := loadAttachCgroupDeviceFilter(insts, license, dirFD); err != nil {
++	// 	if !canSkipEBPFError(r) {
++	// 		return err
++	// 	}
++	// }
+ 	return nil
+ }
+-- 
+2.54.0
+

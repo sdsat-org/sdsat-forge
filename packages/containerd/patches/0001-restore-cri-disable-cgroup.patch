@@ -1,0 +1,84 @@
+diff --git a/internal/cri/config/config.go b/internal/cri/config/config.go
+index 30de76c..49324c9 100644
+--- a/internal/cri/config/config.go
++++ b/internal/cri/config/config.go
+@@ -364,6 +364,9 @@ type RuntimeConfig struct {
+ 	// Log line longer than the limit will be split into multiple lines. Non-positive
+ 	// value means no limit.
+ 	MaxContainerLogLineSize int `toml:"max_container_log_line_size" json:"maxContainerLogLineSize"`
++	// DisableCgroup omits CRI resource limits and explicit cgroup placement.
++	// The OCI runtime may still use cgroups for process tracking.
++	DisableCgroup bool `toml:"disable_cgroup" json:"disableCgroup"`
+ 	// DisableApparmor indicates to disable the apparmor support.
+ 	// This is useful when the containerd does not have permission to access Apparmor.
+ 	DisableApparmor bool `toml:"disable_apparmor" json:"disableApparmor"`
+diff --git a/internal/cri/opts/spec_opts.go b/internal/cri/opts/spec_opts.go
+index 2771016..dd42545 100644
+--- a/internal/cri/opts/spec_opts.go
++++ b/internal/cri/opts/spec_opts.go
+@@ -250,6 +250,16 @@ func WithoutAmbientCaps(_ context.Context, _ oci.Client, c *containers.Container
+ 	return nil
+ }
+ 
++// WithDisabledCgroups omits resource constraints and explicit cgroup placement.
++// This does not prevent the OCI runtime from tracking processes with cgroups.
++func WithDisabledCgroups(_ context.Context, _ oci.Client, _ *containers.Container, s *runtimespec.Spec) error {
++	if s.Linux != nil {
++		s.Linux.CgroupsPath = ""
++		s.Linux.Resources = nil
++	}
++	return nil
++}
++
+ // WithSelinuxLabels sets the mount and process labels
+ func WithSelinuxLabels(process, mount string) oci.SpecOpts {
+ 	return func(ctx context.Context, client oci.Client, c *containers.Container, s *runtimespec.Spec) (err error) {
+diff --git a/internal/cri/server/container_create.go b/internal/cri/server/container_create.go
+index a3864be..aa70026 100644
+--- a/internal/cri/server/container_create.go
++++ b/internal/cri/server/container_create.go
+@@ -832,10 +832,14 @@ func (c *criService) buildLinuxSpec(
+ 		specOpts = append(specOpts, oci.WithRootFSReadonly())
+ 	}
+ 
+-	specOpts = append(specOpts, customopts.WithResources(config.GetLinux().GetResources(), c.config.TolerateMissingHugetlbController, c.config.DisableHugetlbController))
+-	if sandboxConfig.GetLinux().GetCgroupParent() != "" {
+-		cgroupsPath := getCgroupsPath(sandboxConfig.GetLinux().GetCgroupParent(), id)
+-		specOpts = append(specOpts, oci.WithCgroup(cgroupsPath))
++	if c.config.DisableCgroup {
++		specOpts = append(specOpts, customopts.WithDisabledCgroups)
++	} else {
++		specOpts = append(specOpts, customopts.WithResources(config.GetLinux().GetResources(), c.config.TolerateMissingHugetlbController, c.config.DisableHugetlbController))
++		if sandboxConfig.GetLinux().GetCgroupParent() != "" {
++			cgroupsPath := getCgroupsPath(sandboxConfig.GetLinux().GetCgroupParent(), id)
++			specOpts = append(specOpts, oci.WithCgroup(cgroupsPath))
++		}
+ 	}
+ 
+ 	supplementalGroups := securityContext.GetSupplementalGroups()
+diff --git a/internal/cri/server/podsandbox/sandbox_run_linux.go b/internal/cri/server/podsandbox/sandbox_run_linux.go
+index 997c6f8..22fa09c 100644
+--- a/internal/cri/server/podsandbox/sandbox_run_linux.go
++++ b/internal/cri/server/podsandbox/sandbox_run_linux.go
+@@ -60,7 +60,9 @@ func (c *Controller) sandboxContainerSpec(id string, config *runtime.PodSandboxC
+ 	specOpts = append(specOpts, oci.WithProcessArgs(append(imageConfig.Entrypoint, imageConfig.Cmd...)...))
+ 
+ 	// Set cgroups parent.
+-	if config.GetLinux().GetCgroupParent() != "" {
++	if c.config.DisableCgroup {
++		specOpts = append(specOpts, customopts.WithDisabledCgroups)
++	} else if config.GetLinux().GetCgroupParent() != "" {
+ 		cgroupsPath := getCgroupsPath(config.GetLinux().GetCgroupParent(), id)
+ 		specOpts = append(specOpts, oci.WithCgroup(cgroupsPath))
+ 	}
+@@ -192,7 +194,9 @@ func (c *Controller) sandboxContainerSpec(id string, config *runtime.PodSandboxC
+ 
+ 	// Note: LinuxSandboxSecurityContext does not currently provide an apparmor profile
+ 
+-	specOpts = append(specOpts, customopts.WithDefaultSandboxShares)
++	if !c.config.DisableCgroup {
++		specOpts = append(specOpts, customopts.WithDefaultSandboxShares)
++	}
+ 
+ 	if res := config.GetLinux().GetResources(); res != nil {
+ 		specOpts = append(specOpts,

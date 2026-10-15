@@ -3,6 +3,7 @@ set -eu
 trap 'status=$?; if [ "$status" -ne 0 ]; then echo "openRuyi Zero boot check failed ($status)." >&2; /bin/busybox poweroff -f; fi' EXIT
 
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export FORGE_BUSYBOX=/usr/libexec/tianzhi/busybox
 /bin/busybox --install -s /usr/bin
 mkdir -p /dev /proc /sys /tmp
 mount -t devtmpfs devtmpfs /dev
@@ -16,7 +17,7 @@ exec </dev/console >/dev/console 2>/dev/console
 [ -x /bin/bash ]
 [ -x /bin/mdevd ]
 /bin/bash -c '[ "$BASH_VERSION" ]'
-/bin/sh /forge-userspace-check.sh
+/bin/sh /usr/libexec/tianzhi/userspace-check
 printf 'openRuyi %s checks passed.\n' "$VERSION_ID"
 echo FORGE_BOOT_OK
 /bin/busybox poweroff -f

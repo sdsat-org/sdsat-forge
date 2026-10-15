@@ -52,7 +52,7 @@ enum Action {
         #[arg(long)]
         qemu: Option<String>,
     },
-    /// Inspect local programs and the profile Rust toolchain.
+    /// Inspect local tools and the selected build host.
     Doctor,
     /// Install the profile Rust toolchain and helpers declared by the packages.
     Setup,
@@ -117,7 +117,10 @@ fn execute(cli: Cli) -> Result<()> {
         }
         Action::Build { package } => build.build(package.as_deref(), false),
         Action::Rebuild { package } => build.build(Some(&package), true),
-        Action::Run { qemu } => build.run(None, qemu.as_deref()),
+        Action::Run { qemu } => {
+            eprintln!("[forge] starting {} in QEMU...", build.preset.name);
+            build.run(None, qemu.as_deref())
+        }
         Action::TestBoot { timeout, qemu } => {
             ensure!(timeout > 0, "timeout must be positive");
             build.test_boot(Duration::from_secs(timeout), qemu.as_deref())
@@ -144,13 +147,47 @@ fn execute(cli: Cli) -> Result<()> {
 }
 
 fn doctor(build: &Build) -> Result<()> {
+    if sdsat_forge::remote::host()?.is_some() {
+        if let Some(qemu) = &build.board.qemu {
+            ensure!(
+                Command::new(&qemu.program)
+                    .arg("--version")
+                    .status()?
+                    .success(),
+                "local QEMU is unavailable"
+            );
+        }
+        sdsat_forge::remote::run(build, "doctor", None)?;
+        return Ok(());
+    }
     let mut missing = Vec::new();
     for program in ["cargo", "rustup", "curl", "git"]
         .into_iter()
         .chain(build.host_tools())
-        .chain(build.board.qemu.as_ref().map(|q| q.program.as_str()))
+        .chain(
+            build
+                .board
+                .qemu
+                .as_ref()
+                .filter(|_| std::env::var_os("FORGE_REMOTE_WORKER").is_none())
+                .map(|q| q.program.as_str()),
+        )
     {
-        match Command::new(program).arg("--version").output() {
+        let version_arg = if program == "go" {
+            "version"
+        } else {
+            "--version"
+        };
+        let executable = if program == "go" {
+            sdsat_forge::backend::go::program()
+        } else {
+            PathBuf::from(program)
+        };
+        match Command::new(executable)
+            .env("RUSTUP_TOOLCHAIN", &build.profile.toolchain)
+            .arg(version_arg)
+            .output()
+        {
             Ok(output) if output.status.success() => {
                 let text = String::from_utf8_lossy(&output.stdout);
                 println!(
@@ -186,6 +223,10 @@ fn doctor(build: &Build) -> Result<()> {
 }
 
 fn setup(build: &Build) -> Result<()> {
+    if sdsat_forge::remote::host()?.is_some() {
+        sdsat_forge::remote::run(build, "setup", None)?;
+        return Ok(());
+    }
     let targets = build.rust_targets().join(",");
     let components = build.rust_components().join(",");
     let mut args = vec![
@@ -230,5 +271,6 @@ fn setup(build: &Build) -> Result<()> {
             &build.root,
         )?;
     }
+    sdsat_forge::backend::go::setup(&build.go_toolchains())?;
     Ok(())
 }

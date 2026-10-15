@@ -4,9 +4,9 @@
 
 ## 快速入手
 
-安装 Rust（含 Cargo、rustup）、just、Git、curl 和 QEMU，并加入 `PATH`。
+安装 Rust（含 Cargo、rustup）、just、Git、curl 和 QEMU，并加入 `PATH`。`just setup` 安装所需的 Rust 工具链；Kubernetes 等 Go 程序直接下载固定版本的预编译包。
 
-> Windows 上构建 BusyBox 需使用 Linux SSH 构建机，先将 `FORGE_BUILD_SSH` 设置为 SSH 主机别名；Linux 可使用本机。
+> Windows 需先在 PowerShell 执行 `$env:FORGE_BUILD_SSH = "user@linux-host"`（也可使用 SSH 主机别名）。源码编译在 Linux 编译机执行，产物取回本机运行 QEMU；`setup`、`doctor` 同样使用编译机。Linux 可使用本机。
 
 在仓库根目录执行以下命令，构建并启动 Asterinas QEMU 系统：
 
@@ -18,13 +18,17 @@ just build
 just run
 ```
 
-产物保存在 `output/qemu_riscv64_asterinas/images/`。其他预设通过 `just list-defconfigs` 查看；硬件预设需将镜像写入启动介质后上板运行。
+产物保存在 `output/qemu_riscv64_asterinas/images/`。可用预设通过 `just list-defconfigs` 查看。
 
-`just test-boot` 自动验证 QEMU 启动，`just plan` 查看构建顺序，`just help` 查看完整帮助。使用 `just --jobs 8 build` 指定编译并行度。
+进入终端后按需执行 `kubernetes-start` 启动 Kubernetes，再用 `kubectl get nodes` 查看节点。`just test-boot --timeout 600` 会自动启动集群并验证一个实际 BusyBox Pod。当前 Asterinas 缺少独立网络命名空间和 CNI，节点显示 `NotReady`；示例使用主机网络、PID/IPC 命名空间及特权容器运行。
+
+Linux/openRuyi QEMU 使用 `just defconfig qemu_riscv64_openruyi_zero`，其余命令相同，Kubernetes 同样在开机后手动启动。此预设使用 bridge CNI，验收节点 `Ready`、独立 Pod IP 和 Pod 间 HTTP 通信；尚未配置 Service 代理和集群 DNS。
+
+`just plan` 查看构建顺序，`just help` 查看完整帮助。使用 `just --jobs 8 build` 指定 Rust/Make 编译并行度。
 
 ## 组件与目录
 
-组件配方支持 `cargo`（Rust 项目）、`kbuild`（标准 Make/Kbuild）和 `prebuilt`（预编译文件）三种后端。
+组件配方支持 `cargo`（Rust）、`go`（Go）、`kbuild`（Make/Kbuild）和 `prebuilt`（预编译文件）四种后端。
 
 - `configs/`、`boards/`、`profiles/`：系统预设、板卡与软件栈配置。
 - `packages/`：组件配方与补丁。

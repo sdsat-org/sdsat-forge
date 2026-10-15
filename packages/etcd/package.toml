@@ -1,0 +1,12 @@
+schema = 1
+name = "etcd"
+backend = "prebuilt"
+source = "etcd"
+artifact = "etcd"
+file = "etcd"
+
+[artifacts]
+"${source}/etcdctl" = "etcdctl"
+"${source}/LICENSE" = "LICENSE.etcd"
+"${source}/NOTICE" = "NOTICE.etcd"
+"${source}/THIRD_PARTY_LICENSES.txt" = "THIRD_PARTY_LICENSES.etcd.txt"

@@ -1,0 +1,39 @@
+schema = 1
+name = "kubernetes"
+backend = "prebuilt"
+source = "kubernetes"
+dependencies = ["etcd", "containerd"]
+inputs = [
+    "support/kubernetes/start.sh", "support/kubernetes/check.sh",
+    "support/kubernetes/make-image.sh", "support/kubernetes/containerd.toml",
+    "support/kubernetes/kubelet.yaml", "support/kubernetes/pod.yaml",
+    "support/kubernetes/linux/check.sh", "support/kubernetes/linux/pod.yaml",
+    "support/kubernetes/linux/server.yaml", "support/kubernetes/linux/containerd.toml",
+    "support/kubernetes/linux/10-forge.conflist",
+    "support/openruyi-zero/kubernetes-start.sh",
+]
+artifact = "kubectl"
+file = "kubectl"
+
+[artifacts]
+"${root}/support/kubernetes/start.sh" = "kubernetes-start.sh"
+"${root}/support/kubernetes/check.sh" = "kubernetes-check.sh"
+"${root}/support/kubernetes/make-image.sh" = "kubernetes-make-image.sh"
+"${root}/support/kubernetes/containerd.toml" = "kubernetes-containerd.toml"
+"${root}/support/kubernetes/kubelet.yaml" = "kubernetes-kubelet.yaml"
+"${root}/support/kubernetes/pod.yaml" = "kubernetes-pod.yaml"
+"${root}/support/kubernetes/linux/check.sh" = "kubernetes-linux-check.sh"
+"${root}/support/kubernetes/linux/pod.yaml" = "kubernetes-linux-pod.yaml"
+"${root}/support/kubernetes/linux/server.yaml" = "kubernetes-linux-server.yaml"
+"${root}/support/kubernetes/linux/containerd.toml" = "kubernetes-linux-containerd.toml"
+"${root}/support/kubernetes/linux/10-forge.conflist" = "kubernetes-cni.conflist"
+"${root}/support/openruyi-zero/kubernetes-start.sh" = "kubernetes-linux-start.sh"
+"${source}/kube-apiserver" = "kube-apiserver"
+"${source}/kube-controller-manager" = "kube-controller-manager"
+"${source}/kube-scheduler" = "kube-scheduler"
+"${source}/kubelet" = "kubelet"
+"${source}/kube-proxy" = "kube-proxy"
+"${source}/kubeadm" = "kubeadm"
+"${source}/LICENSE" = "kubernetes-LICENSE"
+"${source}/NOTICE" = "NOTICE.kubernetes"
+"${source}/THIRD_PARTY_LICENSES.txt" = "THIRD_PARTY_LICENSES.kubernetes.txt"

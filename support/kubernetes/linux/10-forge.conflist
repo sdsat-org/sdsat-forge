@@ -1,0 +1,17 @@
+{
+  "cniVersion": "1.0.0",
+  "name": "forge",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "cni0",
+      "isDefaultGateway": true,
+      "hairpinMode": true,
+      "ipMasq": false,
+      "ipam": {
+        "type": "host-local",
+        "ranges": [[{"subnet": "10.244.0.0/24"}]]
+      }
+    }
+  ]
+}

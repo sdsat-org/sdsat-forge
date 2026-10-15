@@ -1,0 +1,6 @@
+This is the official runc v1.4.2 Linux/riscv64 release, statically linked with
+libseccomp 2.6.0. The corresponding unmodified source archives and licenses
+are bundled alongside this notice: runc-source.tar.xz, libseccomp-source.tar.gz,
+LICENSE (Apache-2.0), and LICENSE.libseccomp (LGPL-2.1).
+
+https://github.com/opencontainers/runc/releases/tag/v1.4.2

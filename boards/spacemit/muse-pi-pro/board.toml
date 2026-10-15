@@ -7,7 +7,7 @@ dtb = "k1-x_MUSE-Pi-Pro.dtb"
 [packages.rustsbi]
 config = "boards/spacemit/muse-pi-pro/rustsbi.toml"
 artifact = "rustsbi.bin"
-build_output = "${work}/target/${target}/release/rustsbi-prototyper-dynamic.bin"
+build_output = "${source}/target/${target}/release/rustsbi-prototyper-dynamic.bin"
 
 [packages.linux]
 config = "boards/spacemit/muse-pi-pro/linux.defconfig"

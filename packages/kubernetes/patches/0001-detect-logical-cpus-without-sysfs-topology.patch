@@ -1,0 +1,48 @@
+From: SDSAT contributors
+Subject: [PATCH] cadvisor: detect logical CPUs when sysfs topology is unavailable
+
+Some kernels provide processor IDs in /proc/cpuinfo before implementing
+the sysfs CPU topology hierarchy. Preserve the real logical CPU count so
+kubelet can use the none CPU, memory and topology policies. Leave physical
+core, socket and NUMA topology unknown rather than inventing relationships.
+
+Only fall back after topology discovery fails with no logical CPUs. Invalid
+or absent processor IDs do not manufacture a successful discovery result.
+
+diff --git a/vendor/github.com/google/cadvisor/lib/machine/info.go b/vendor/github.com/google/cadvisor/lib/machine/info.go
+--- a/vendor/github.com/google/cadvisor/lib/machine/info.go
++++ b/vendor/github.com/google/cadvisor/lib/machine/info.go
+@@ -20,6 +20,7 @@ import (
+ 	"flag"
+ 	"os"
+ 	"path/filepath"
++	"strconv"
+ 	"strings"
+ 	"time"
+
+@@ -106,6 +107,25 @@ func Info(sysFs sysfs.SysFs, fsInfo fs.FsInfo, inHostNamespace bool) (*info.MachineInf
+ 	topology, numCores, err := GetTopology(sysFs)
+ 	if err != nil {
+ 		klog.Errorf("Failed to get topology information: %v", err)
++		if numCores == 0 {
++			// Logical CPU capacity is available independently of physical topology.
++			// Keep topology unknown when sysfs does not describe it.
++			processors := make(map[int]struct{})
++			for _, line := range strings.Split(string(cpuinfo), "\n") {
++				key, value, ok := strings.Cut(line, ":")
++				if !ok || strings.TrimSpace(key) != "processor" {
++					continue
++				}
++				id, parseErr := strconv.Atoi(strings.TrimSpace(value))
++				if parseErr == nil && id >= 0 {
++					processors[id] = struct{}{}
++				}
++			}
++			numCores = len(processors)
++			if numCores > 0 {
++				klog.Infof("Detected %d logical CPUs from /proc/cpuinfo; physical topology is unavailable", numCores)
++			}
++		}
+ 	}
+
+ 	systemUUID, err := sysinfo.GetSystemUUID(sysFs)

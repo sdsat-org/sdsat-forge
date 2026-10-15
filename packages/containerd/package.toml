@@ -1,0 +1,13 @@
+schema = 1
+name = "containerd"
+backend = "prebuilt"
+source = "containerd"
+artifact = "containerd"
+file = "containerd"
+
+[artifacts]
+"${source}/containerd-shim-runc-v2" = "containerd-shim-runc-v2"
+"${source}/ctr" = "ctr"
+"${source}/LICENSE" = "LICENSE.containerd"
+"${source}/NOTICE" = "NOTICE.containerd"
+"${source}/THIRD_PARTY_LICENSES.txt" = "THIRD_PARTY_LICENSES.containerd.txt"

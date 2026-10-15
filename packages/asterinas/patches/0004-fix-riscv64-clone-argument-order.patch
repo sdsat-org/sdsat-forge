@@ -1,0 +1,22 @@
+From: sdsat-forge contributors
+Subject: [PATCH] syscall: use the RISC-V clone argument order
+
+The generic syscall table passes arguments in their native register order.
+RISC-V places TLS before child_tid, unlike x86_64. Normalize them before
+constructing CloneArgs so libc and CGo threads receive the correct TLS.
+
+diff --git a/kernel/core/src/syscall/clone.rs b/kernel/core/src/syscall/clone.rs
+--- a/kernel/core/src/syscall/clone.rs
++++ b/kernel/core/src/syscall/clone.rs
+@@ -22,6 +22,11 @@ pub(super) fn sys_clone(
+     ctx: &Context,
+     parent_context: &UserContext,
+ ) -> Result<SyscallReturn> {
++    // Linux RISC-V passes (flags, stack, parent_tid, tls, child_tid).
++    // The shared handler's argument names follow the x86_64 ABI.
++    #[cfg(target_arch = "riscv64")]
++    let (child_tidptr, tls) = (tls as Vaddr, child_tidptr as u64);
++
+     let args = CloneArgs::for_clone(clone_flags, parent_tidptr, child_tidptr, tls, new_sp)?;
+     debug!("clone args = {:x?}", args);
+

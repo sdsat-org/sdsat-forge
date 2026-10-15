@@ -1,0 +1,36 @@
+From b03d88cb1b0951027768692c1c209e24f324d239 Mon Sep 17 00:00:00 2001
+From: jiangjianfeng <jiangjianfeng.jjf@antgroup.com>
+Date: Mon, 27 Jul 2026 21:54:00 +0800
+Subject: [PATCH] runc: Disable creating /dev/mqueue
+
+---
+ libcontainer/rootfs_linux.go | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/libcontainer/rootfs_linux.go b/libcontainer/rootfs_linux.go
+index 7aaa70d..910fb4f 100644
+--- a/libcontainer/rootfs_linux.go
++++ b/libcontainer/rootfs_linux.go
+@@ -634,12 +634,13 @@ func mountToRootfs(c *mountConfig, m mountEntry) error {
+ 
+ 	switch m.Device {
+ 	case "mqueue":
+-		if err := m.mountPropagate(rootfs, ""); err != nil {
+-			return err
+-		}
+-		return utils.WithProcfdFile(m.dstFile, func(dstFd string) error {
+-			return label.SetFileLabel(dstFd, mountLabel)
+-		})
++		// if err := m.mountPropagate(rootfs, ""); err != nil {
++		// 	return err
++		// }
++		// return utils.WithProcfdFile(m.dstFile, func(dstFd string) error {
++		// 	return label.SetFileLabel(dstFd, mountLabel)
++		// })
++		return nil
+ 	case "tmpfs":
+ 		var err error
+ 		if m.Extensions&configs.EXT_COPYUP == configs.EXT_COPYUP {
+-- 
+2.54.0
+

@@ -1,0 +1,34 @@
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+address: 10.0.2.15
+port: 10250
+readOnlyPort: 0
+healthzBindAddress: 127.0.0.1
+authentication:
+  anonymous:
+    enabled: true
+  webhook:
+    enabled: false
+authorization:
+  mode: AlwaysAllow
+containerRuntimeEndpoint: unix:///run/containerd/containerd.sock
+cgroupDriver: cgroupfs
+cgroupsPerQOS: false
+enforceNodeAllocatable: []
+failCgroupV1: false
+failSwapOn: false
+cpuCFSQuota: false
+cpuManagerPolicy: none
+topologyManagerPolicy: none
+memoryManagerPolicy: None
+podPidsLimit: -1
+localStorageCapacityIsolation: false
+evictionHard: {}
+mergeDefaultEvictionSettings: false
+imageGCHighThresholdPercent: 100
+imageGCLowThresholdPercent: 99
+serializeImagePulls: true
+seccompDefault: false
+enableControllerAttachDetach: false
+resolvConf: /etc/resolv.conf
+maxPods: 8

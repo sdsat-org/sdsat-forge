@@ -8,6 +8,7 @@ patches = [
     "packages/asterinas/patches/0001-short-vis-path-normalize-windows-paths.patch",
     "packages/asterinas/patches/0002-component-macro-use-manifest-path.patch",
     "packages/asterinas/patches/0003-add-cargo-kernel-binary.patch",
+    "packages/asterinas/patches/0004-fix-riscv64-clone-argument-order.patch",
 ]
 artifact = "asterinas.elf"
 

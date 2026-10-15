@@ -1,10 +1,30 @@
 # Source versions change only through an explicit lock update.
 schema = 1
 
+[sources.containerd]
+version = "v2.4.2-sdsat.1"
+url = "https://github.com/sdsat-org/containerd/releases/download/v2.4.2-sdsat.1/containerd-v2.4.2-sdsat.1-linux-riscv64.tar.gz"
+sha256 = "517980ff2e9aa037fb5a02ca8376ba189583d9a9852112c2e312bde72b918418"
+
+[sources.runc-asterinas]
+version = "v1.4.2-asterinas.1"
+url = "https://github.com/sdsat-org/runc/releases/download/v1.4.2/runc-asterinas-v1.4.2-asterinas.1-linux-riscv64.tar.gz"
+sha256 = "a1aa96a5a79eef201333c596dd41b25b57def23ff074f5a576503f4991ae0075"
+
+[sources.etcd]
+version = "v3.7.2-sdsat.1"
+url = "https://github.com/sdsat-org/etcd/releases/download/v3.7.2-sdsat.1/etcd-v3.7.2-sdsat.1-linux-riscv64.tar.gz"
+sha256 = "4622a2f3edf0ed7e148eb3dcafbdd9a898e0613885a5c7b94ba93afecc252b96"
+
+[sources.kubernetes]
+version = "v1.38.0-alpha.0-sdsat.48f5417.1"
+url = "https://github.com/sdsat-org/kubernetes/releases/download/v1.38.0-alpha.0-sdsat.48f5417.1/kubernetes-v1.38.0-alpha.0-sdsat.48f5417.1-linux-riscv64.tar.gz"
+sha256 = "e3537a87eb20fb29929f05f2a046419debbef590760caf76dac5daca1a470ee9"
+
 [sources.rustsbi]
-version = "c11e9d2c7850cc9672329e8a4f372214bd31d090"
-url = "https://codeload.github.com/rustsbi/rustsbi/tar.gz/c11e9d2c7850cc9672329e8a4f372214bd31d090"
-sha256 = "85320b8bf4e7e6ef1455c7a8c865f8e596df83b6c189bae81f185678846ddbac"
+version = "7a524db192f4962fa14ef60ee4d78d47717e52dd"
+url = "https://codeload.github.com/rustsbi/rustsbi/tar.gz/7a524db192f4962fa14ef60ee4d78d47717e52dd"
+sha256 = "7d2e052dd3aa4cce7d9a1fb853d0f4f339582d72e1a32ea1e4a14e9edacc2f6d"
 
 [sources.asterinas]
 version = "af0b77c8f11db24ba59b8d2cf29a189281b8e270"
