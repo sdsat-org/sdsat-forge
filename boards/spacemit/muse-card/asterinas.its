@@ -1,0 +1,46 @@
+/dts-v1/;
+/ {
+    description = "MUSE-Card Asterinas and BusyBox";
+    #address-cells = <2>;
+    images {
+        kernel {
+            description = "Asterinas";
+            data = /incbin/("asterinas.bin.gz");
+            type = "kernel";
+            arch = "riscv";
+            os = "linux";
+            compression = "gzip";
+            load = <0x0 0x400000>;
+            entry = <0x0 0x400000>;
+            hash-1 { algo = "crc32"; };
+        };
+        ramdisk {
+            description = "BusyBox initramfs";
+            data = /incbin/("initramfs.cpio");
+            type = "ramdisk";
+            arch = "riscv";
+            os = "linux";
+            compression = "none";
+            load = <0x0 0x2000000>;
+            hash-1 { algo = "crc32"; };
+        };
+        fdt {
+            description = "MUSE-Card";
+            data = /incbin/("asterinas.dtb");
+            type = "flat_dt";
+            arch = "riscv";
+            compression = "none";
+            load = <0x0 0x3000000>;
+            hash-1 { algo = "crc32"; };
+        };
+    };
+    configurations {
+        default = "muse-card";
+        muse-card {
+            description = "k1-x_MUSE-Card";
+            kernel = "kernel";
+            ramdisk = "ramdisk";
+            fdt = "fdt";
+        };
+    };
+};

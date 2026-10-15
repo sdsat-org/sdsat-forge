@@ -123,13 +123,6 @@ impl Build {
                 && board.qemu.as_ref().is_none_or(|q| q.smp > 0),
             "unsupported board schema/architecture/CPU count"
         );
-        if let Some(sdcard) = &board.sdcard {
-            config::validate_filename(&sdcard.dtb)?;
-            ensure!(
-                board.qemu.is_none(),
-                "SD hardware and QEMU boot are separate board configurations"
-            );
-        }
         let profile: Profile = config::read(&config::input_path(
             &root,
             &format!("profiles/{}/profile.toml", preset.profile),
@@ -159,9 +152,6 @@ impl Build {
             );
         }
         let mut artifacts = BTreeSet::from(["initramfs.cpio"]);
-        if board.sdcard.is_some() {
-            artifacts.extend(image::spacemit_k1::ARTIFACTS.iter().copied());
-        }
         for recipe in recipes.values() {
             ensure!(
                 sources.sources.contains_key(&recipe.source),
@@ -387,12 +377,6 @@ impl Build {
                     .chain(recipe.artifacts.values().map(String::as_str))
             })
             .chain(["initramfs.cpio"])
-            .chain(
-                self.board
-                    .sdcard
-                    .iter()
-                    .flat_map(|_| image::spacemit_k1::ARTIFACTS.iter().copied()),
-            )
             .collect()
     }
 
@@ -644,16 +628,6 @@ impl Build {
         }
         if package.is_none() {
             self.initramfs()?;
-            if let Some(sdcard) = &self.board.sdcard {
-                image::spacemit_k1::create(
-                    &self.output.join("images"),
-                    &self.artifact(&self.profile.firmware),
-                    &self.artifact(&self.profile.kernel),
-                    &self.output.join("images/initramfs.cpio"),
-                    &self.profile.boot.append,
-                    &sdcard.dtb,
-                )?;
-            }
             let artifacts = self
                 .system_artifacts()
                 .iter()
@@ -889,7 +863,6 @@ impl Build {
         }
         data.extend_from_slice(include_bytes!("image.rs"));
         data.extend_from_slice(include_bytes!("remote.rs"));
-        data.extend_from_slice(include_bytes!("image/spacemit_k1.rs"));
         data.extend_from_slice(include_bytes!("engine.rs"));
         data.extend_from_slice(include_bytes!("config.rs"));
         data.extend_from_slice(include_bytes!("backend/mod.rs"));

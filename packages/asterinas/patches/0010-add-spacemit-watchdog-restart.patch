@@ -1,0 +1,258 @@
+Subject: [PATCH] riscv: add SpacemiT watchdog restart fallback
+
+Use the existing power-handler dispatcher after SBI SRST. Discover the
+watchdog and its MPMU clock/reset resources from the vendor device-tree
+bindings, acquire exclusive uncached MMIO, and follow the vendor restart
+sequence. Serialize concurrent callers and preserve the existing reboot
+capability check. No board-name or fixed physical-address matching is used.
+
+Register references:
+https://github.com/spacemit-com/uboot-2022.10/blob/1fa1ca64e9705a3650bcc7c21f6666949290830f/drivers/watchdog/spacemit_wdt.c
+https://github.com/spacemit-com/linux-6.6/blob/31c449aeaad8c7759bc983ca0e26946e5b6746dc/drivers/watchdog/k1x_wdt.c
+
+---
+diff --git a/kernel/core/src/arch/riscv/mod.rs b/kernel/core/src/arch/riscv/mod.rs
+index 86bd7a5..184d21f 100644
+--- a/kernel/core/src/arch/riscv/mod.rs
++++ b/kernel/core/src/arch/riscv/mod.rs
+@@ -4,4 +4,6 @@ pub(crate) mod cpu;
+ mod power;
+ pub(crate) mod signal;
+ 
+-pub(crate) fn init() {}
++pub(crate) fn init() {
++    power::init();
++}
+diff --git a/kernel/core/src/arch/riscv/power/spacemit.rs b/kernel/core/src/arch/riscv/power/spacemit.rs
+new file mode 100644
+index 0000000..a00a6cf
+--- /dev/null
++++ b/kernel/core/src/arch/riscv/power/spacemit.rs
+@@ -0,0 +1,207 @@
++// SPDX-License-Identifier: MPL-2.0
++
++//! SpacemiT K1 watchdog restart fallback, discovered from the device tree.
++//!
++//! Register protocol: SpacemiT U-Boot `drivers/watchdog/spacemit_wdt.c`,
++//! `drivers/clk/spacemit/ccu-k1x.c`, and `drivers/reset/reset-spacemit-k1x.c`
++//! at revision 1fa1ca64e9705a3650bcc7c21f6666949290830f. The reset sequence
++//! also follows Linux `drivers/watchdog/k1x_wdt.c::spa_wdt_restart_handler`
++//! at revision 31c449aeaad8c7759bc983ca0e26946e5b6746dc.
++
++use core::sync::atomic::{AtomicBool, Ordering};
++
++use ostd::{arch::boot::DEVICE_TREE, io::IoMem, mm::VmIoOnce, power::ExitCode};
++use spin::Once;
++
++// Offsets in the watchdog block. These are 32-bit registers. WFAR/WSAR are
++// write-access keys; WCR is a counter-reset command, never an RMW target.
++const WFAR: usize = 0xb0;
++const WSAR: usize = 0xb4;
++const WMER: usize = 0xb8;
++const WMR: usize = 0xbc;
++const WSR: usize = 0xc0;
++const WCR: usize = 0xc8;
++const WDT_SIZE: usize = WCR + size_of::<u32>();
++
++// MPMU registers and bindings from the same vendor clock/reset drivers.
++const WDTPCR: usize = 0x200;
++const APRR: usize = 0x1020;
++const CLK_WDT: u32 = 151;
++const RESET_WDT: u32 = 52;
++const CLOCK_ENABLE: u32 = 0b11;
++const WATCHDOG_RESET: u32 = 1 << 2;
++const SYSTEM_RESET_ENABLE: u32 = 1 << 4;
++
++struct Watchdog {
++    registers: IoMem,
++    clock_control: IoMem,
++    reset_control: IoMem,
++    ticks_per_second: usize,
++    restarting: AtomicBool,
++}
++
++static WATCHDOG: Once<Watchdog> = Once::new();
++
++impl Watchdog {
++    fn write(&self, offset: usize, value: u32) -> ostd::Result<()> {
++        // Each protected write requires both keys. Order device transactions;
++        // volatile access alone does not provide RISC-V I/O ordering.
++        self.registers.write_once(WFAR, &0xbabau32)?;
++        riscv::asm::fence();
++        self.registers.write_once(WSAR, &0xeb10u32)?;
++        riscv::asm::fence();
++        self.registers.write_once(offset, &value)?;
++        riscv::asm::fence();
++        Ok(())
++    }
++
++    fn arm(&self) -> ostd::Result<()> {
++        // These two RW control registers are exclusively acquired at init.
++        // The restart guard serializes all callers, including other CPUs.
++        // Preserve unrelated clock selection and system-reset bits.
++        let clock = self.clock_control.read_once::<u32>(0)?;
++        self.clock_control.write_once(0, &(clock | CLOCK_ENABLE))?;
++        riscv::asm::fence();
++        self.clock_control
++            .write_once(0, &((clock | CLOCK_ENABLE) & !WATCHDOG_RESET))?;
++        riscv::asm::fence();
++        let _ = self.clock_control.read_once::<u32>(0)?;
++
++        // Linux uses one 256 Hz watchdog tick. WSR is cleared by writing 0;
++        // it must not be treated as a write-one-to-clear status register.
++        self.write(WSR, 0)?;
++        self.write(WMR, 1)?;
++        self.write(WMER, 3)?;
++        self.write(WCR, 1)?;
++        let reset = self.reset_control.read_once::<u32>(0)?;
++        self.reset_control
++            .write_once(0, &(reset | SYSTEM_RESET_ENABLE))?;
++        riscv::asm::fence();
++        Ok(())
++    }
++
++    fn restart(&self) {
++        if self.restarting.swap(true, Ordering::Acquire) {
++            // Do not fall through to machine_halt while another CPU is still
++            // programming the watchdog: its halt IPI could stop that writer.
++            while self.restarting.load(Ordering::Acquire) {
++                core::hint::spin_loop();
++            }
++            return;
++        }
++
++        if self.arm().is_ok() {
++            // The counter runs independently of CPU interrupts. Give hardware
++            // up to five seconds, as the vendor Linux restart handler does.
++            let start = riscv::register::time::read();
++            let timeout = self.ticks_per_second.saturating_mul(5);
++            while riscv::register::time::read().wrapping_sub(start) < timeout {
++                core::hint::spin_loop();
++            }
++        }
++        self.restarting.store(false, Ordering::Release);
++        // Returning allows the existing power dispatcher to try fallbacks or
++        // halt all CPUs if reset failed. No allocation or panic is needed here.
++    }
++}
++
++fn try_restart(_code: ExitCode) {
++    if let Some(watchdog) = WATCHDOG.get() {
++        watchdog.restart();
++    }
++}
++
++// SBI SRST remains first choice; this driver is used only when it returns.
++crate::register_restart_handler!(try_restart, crate::power::Priority::DEFAULT);
++
++pub(super) fn init() {
++    if let Some(watchdog) = acquire_watchdog() {
++        WATCHDOG.call_once(|| watchdog);
++        ostd::info!("SpacemiT watchdog restart handler initialized");
++    }
++}
++
++fn acquire_watchdog() -> Option<Watchdog> {
++    let fdt = DEVICE_TREE.get()?;
++    let node = fdt.find_compatible(&["spacemit,k1x-wdt", "spacemit,soc-wdt"])?;
++    if !matches!(
++        node.property("status").and_then(|p| p.as_str()),
++        None | Some("ok" | "okay")
++    ) {
++        return None;
++    }
++
++    // Require the vendor binding, rather than assuming that any referenced
++    // clock/reset controller has the same register layout or specifier IDs.
++    let (clock_phandle, clock_id) = specifier(node.property("clocks")?.value)?;
++    let (reset_phandle, reset_id) = specifier(node.property("resets")?.value)?;
++    if clock_id != CLK_WDT || reset_id != RESET_WDT {
++        return None;
++    }
++    let clock = fdt.find_phandle(clock_phandle)?;
++    let reset = fdt.find_phandle(reset_phandle)?;
++    if !clock.compatible()?.all().any(|c| c == "spacemit,k1x-ccu")
++        || !reset.compatible()?.all().any(|c| c == "spacemit,k1x-reset")
++        || clock.property("#clock-cells")?.as_usize()? != 1
++        || reset.property("#reset-cells")?.as_usize()? != 1
++        || clock
++            .property("reg-names")?
++            .value
++            .split(|b| *b == 0)
++            .next()?
++            != b"mpmu"
++        || reset
++            .property("reg-names")?
++            .value
++            .split(|b| *b == 0)
++            .next()?
++            != b"mpmu"
++    {
++        return None;
++    }
++    let clock_reg = clock.reg()?.next()?;
++    let reset_reg = reset.reg()?.next()?;
++    let mpmu = clock_reg.starting_address as usize;
++    if reset_reg.starting_address as usize != mpmu
++        || clock_reg.size? < WDTPCR + size_of::<u32>()
++        || reset_reg.size? < APRR + size_of::<u32>()
++    {
++        return None;
++    }
++
++    let wdt_reg = node.reg()?.next()?;
++    let wdt = wdt_reg.starting_address as usize;
++    let clock_addr = mpmu.checked_add(WDTPCR)?;
++    let reset_addr = mpmu.checked_add(APRR)?;
++    if wdt_reg.size? < WDT_SIZE
++        || [wdt, clock_addr, reset_addr]
++            .iter()
++            .any(|addr| addr % 4 != 0)
++    {
++        return None;
++    }
++    let ticks_per_second = fdt
++        .find_node("/cpus")?
++        .property("timebase-frequency")?
++        .as_usize()?;
++    if ticks_per_second == 0 {
++        return None;
++    }
++
++    // IoMem owns the ranges and uses uncacheable mappings. Acquisition rejects
++    // overlap with other owners; do not bypass it for shared clock controllers.
++    Some(Watchdog {
++        registers: IoMem::acquire(wdt..wdt.checked_add(WDT_SIZE)?).ok()?,
++        clock_control: IoMem::acquire(clock_addr..clock_addr.checked_add(4)?).ok()?,
++        reset_control: IoMem::acquire(reset_addr..reset_addr.checked_add(4)?).ok()?,
++        ticks_per_second,
++        restarting: AtomicBool::new(false),
++    })
++}
++
++fn specifier(bytes: &[u8]) -> Option<(u32, u32)> {
++    Some((
++        u32::from_be_bytes(bytes.get(..4)?.try_into().ok()?),
++        u32::from_be_bytes(bytes.get(4..8)?.try_into().ok()?),
++    ))
++}
+diff --git a/kernel/core/src/arch/riscv/power.rs b/kernel/core/src/arch/riscv/power.rs
+index 834a85a..d9860c2 100644
+--- a/kernel/core/src/arch/riscv/power.rs
++++ b/kernel/core/src/arch/riscv/power.rs
+@@ -1,5 +1,7 @@
+ // SPDX-License-Identifier: MPL-2.0
+ 
++mod spacemit;
++
+ crate::register_restart_handler!(
+     ostd::arch::power::try_restart,
+     crate::power::Priority::FIRMWARE
+@@ -8,3 +10,7 @@ crate::register_poweroff_handler!(
+     ostd::arch::power::try_poweroff,
+     crate::power::Priority::FIRMWARE
+ );
++
++pub(super) fn init() {
++    spacemit::init();
++}

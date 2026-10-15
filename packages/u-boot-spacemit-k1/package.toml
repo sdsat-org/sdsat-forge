@@ -1,0 +1,23 @@
+schema = 1
+name = "u-boot-spacemit-k1"
+backend = "prebuilt"
+source = "u-boot-spacemit-k1"
+artifact = "u-boot.itb"
+extract = false
+inputs = ["packages/u-boot-spacemit-k1/NOTICE"]
+
+[prebuilt]
+member = "u-boot.itb"
+
+[prebuilt.artifacts]
+"factory/FSBL.bin" = "FSBL.vendor.bin"
+"factory/bootinfo_spinor.bin" = "bootinfo_spinor.bin"
+"factory/bootinfo_sd.bin" = "bootinfo_sd.bin"
+"env.bin" = "u-boot-env-default.bin"
+
+[extra_sources]
+license = "u-boot-spacemit-k1-license"
+
+[artifacts]
+"${extra.license}" = "LICENSE.u-boot-spacemit-k1"
+"${root}/packages/u-boot-spacemit-k1/NOTICE" = "NOTICE.u-boot-spacemit-k1"

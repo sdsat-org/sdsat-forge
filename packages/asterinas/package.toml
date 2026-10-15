@@ -9,6 +9,13 @@ patches = [
     "packages/asterinas/patches/0002-component-macro-use-manifest-path.patch",
     "packages/asterinas/patches/0003-add-cargo-kernel-binary.patch",
     "packages/asterinas/patches/0004-fix-riscv64-clone-argument-order.patch",
+    "packages/asterinas/patches/0005-riscv64-runtime-load-address.patch",
+    "packages/asterinas/patches/0006-add-riscv-xscale-uart.patch",
+    "packages/asterinas/patches/0007-riscv64-all-memory-nodes.patch",
+    "packages/asterinas/patches/0008-flush-fault-around-page.patch",
+    "packages/asterinas/patches/0009-flush-boot-frame-metadata-mappings.patch",
+    "packages/asterinas/patches/0010-add-spacemit-watchdog-restart.patch",
+    "packages/asterinas/patches/0011-riscv64-serialize-hart-start.patch",
 ]
 artifact = "asterinas.elf"
 

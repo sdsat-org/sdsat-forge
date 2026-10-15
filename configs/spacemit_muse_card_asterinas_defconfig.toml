@@ -1,0 +1,6 @@
+schema = 1
+name = "spacemit_muse_card_asterinas"
+board = "spacemit/muse-card"
+profile = "asterinas-busybox-minimal"
+packages = ["spacemit-fsbl", "rustsbi", "u-boot-spacemit-k1", "asterinas", "busybox"]
+lock = "locks/spacemit_muse_card_asterinas.lock.toml"

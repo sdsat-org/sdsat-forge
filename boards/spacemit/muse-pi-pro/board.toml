@@ -1,9 +1,6 @@
 schema = 1
 arch = "riscv64"
 
-[sdcard]
-dtb = "k1-x_MUSE-Pi-Pro.dtb"
-
 [packages.rustsbi]
 config = "boards/spacemit/muse-pi-pro/rustsbi.toml"
 artifact = "rustsbi.bin"

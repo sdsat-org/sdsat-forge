@@ -50,7 +50,6 @@ pub struct Board {
     #[serde(default)]
     pub rootfs_files: BTreeMap<String, RootfsFile>,
     pub qemu: Option<QemuConfig>,
-    pub sdcard: Option<SdCard>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,12 +101,6 @@ impl RootfsFile {
             _ => 0o644,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SdCard {
-    pub dtb: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -382,6 +375,7 @@ pub fn recipes(root: &Path, preset: &Preset, board: &Board) -> Result<BTreeMap<S
             "{name}: [prebuilt] settings are only supported by the prebuilt backend"
         );
         if recipe.backend == "prebuilt" {
+            crate::backend::prebuilt::prepare(&mut recipe)?;
             crate::backend::prebuilt::validate(&recipe)?;
         }
         ensure!(

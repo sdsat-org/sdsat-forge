@@ -1,7 +1,5 @@
 //! Package system images and boot them with QEMU.
 
-pub mod spacemit_k1;
-
 use anyhow::{Context, Result, ensure};
 use flate2::{Compression, write::GzEncoder};
 use std::collections::BTreeSet;

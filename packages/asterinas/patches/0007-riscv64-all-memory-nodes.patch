@@ -1,0 +1,39 @@
+Subject: [PATCH] riscv: discover all enabled memory nodes
+
+Firmware can describe discontiguous RAM banks as separate memory nodes.
+Read every enabled root-level memory node instead of only the first one,
+while retaining support for multiple reg entries within each node.
+
+---
+diff --git a/ostd/src/arch/riscv/boot/mod.rs b/ostd/src/arch/riscv/boot/mod.rs
+--- a/ostd/src/arch/riscv/boot/mod.rs
++++ b/ostd/src/arch/riscv/boot/mod.rs
+@@ -58,12 +58,25 @@ fn parse_memory_regions(device_tree_paddr: usize) -> MemoryRegionArray {
+ 
+     let device_tree = DEVICE_TREE.get().unwrap();
+ 
+-    for region in device_tree.memory().regions() {
+-        if region.size.unwrap_or(0) > 0 {
++    // Firmware may describe each RAM bank in a separate root-level memory node.
++    for node in device_tree.find_node("/").unwrap().children() {
++        if node.property("device_type").and_then(|p| p.as_str()) != Some("memory") {
++            continue;
++        }
++        if node
++            .property("status")
++            .is_some_and(|p| !matches!(p.as_str(), Some("okay" | "ok")))
++        {
++            continue;
++        }
++        for region in node.reg().into_iter().flatten() {
++            let Some(size) = region.size.filter(|&size| size > 0) else {
++                continue;
++            };
+             regions
+                 .push(MemoryRegion::new(
+                     region.starting_address as usize,
+-                    region.size.unwrap(),
++                    size,
+                     MemoryRegionType::Usable,
+                 ))
+                 .unwrap();

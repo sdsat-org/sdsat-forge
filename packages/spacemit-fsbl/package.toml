@@ -1,0 +1,22 @@
+schema = 1
+name = "spacemit-fsbl"
+backend = "kbuild"
+source = "spacemit-fsbl"
+toolchain = "bootlin-riscv64-musl"
+artifact = "FSBL.bin"
+build_output = "FSBL.bin"
+# The vendor packaging target uses srctree for both its SPL input and output.
+in_tree = true
+args = ["spl/u-boot-spl.bin", "SOURCE_DATE_EPOCH=0"]
+
+[kbuild]
+tools = ["gcc", "bison", "flex", "openssl", "python3", "xz"]
+config = "olddefconfig"
+arch = "riscv"
+compiler_pattern = "riscv64*-gcc"
+compiler_suffix = "gcc"
+host_os = "Linux"
+host_arch = "x86_64"
+
+[artifacts]
+"Licenses/gpl-2.0.txt" = "LICENSE.spacemit-fsbl"

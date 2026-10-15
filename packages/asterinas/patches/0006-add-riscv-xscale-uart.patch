@@ -1,0 +1,126 @@
+Subject: [PATCH] uart: support XScale and PXA consoles on RISC-V
+
+Use 32-bit registers at four-byte intervals and retain the baud divisor
+configured by the firmware. Unlike NS16550A, these UARTs require the
+UART Unit Enable bit in IER for both transmit and receive operation.
+
+---
+diff --git a/kernel/comps/uart/src/arch/riscv/mod.rs b/kernel/comps/uart/src/arch/riscv/mod.rs
+--- a/kernel/comps/uart/src/arch/riscv/mod.rs
++++ b/kernel/comps/uart/src/arch/riscv/mod.rs
+@@ -4,10 +4,16 @@ use ostd::arch::boot::DEVICE_TREE;
+ 
+ mod ns16550a;
+ mod sifive;
++mod xscale;
+ 
+ pub(super) fn init() {
+     let device_tree = DEVICE_TREE.get().unwrap();
+ 
++    if let Some(xscale_node) = device_tree.find_compatible(&xscale::FDT_COMPATIBLES) {
++        xscale::init(xscale_node);
++        return;
++    }
++
+     if let Some(ns16550a_node) = device_tree.find_compatible(&ns16550a::FDT_COMPATIBLES) {
+         ns16550a::init(ns16550a_node);
+         return;
+diff --git a/kernel/comps/uart/src/arch/riscv/xscale.rs b/kernel/comps/uart/src/arch/riscv/xscale.rs
+new file mode 100644
+--- /dev/null
++++ b/kernel/comps/uart/src/arch/riscv/xscale.rs
+@@ -0,0 +1,94 @@
++// SPDX-License-Identifier: MPL-2.0
++
++//! XScale/PXA UART console support.
++//!
++//! Register layout and the UART Unit Enable bit follow the Intel PXA27x
++//! Developer's Manual, chapter 10, and Linux's PXA UART driver:
++//! <https://github.com/torvalds/linux/blob/v6.6/drivers/tty/serial/pxa.c>.
++
++use alloc::string::ToString;
++
++use fdt::node::FdtNode;
++use fdt_util::{AcquireIoMems, AcquireIrqLines};
++use ostd::{
++    arch::irq::MappedIrqLine,
++    console::uart_ns16650a::{Ns16550aAccess, Ns16550aRegister, Ns16550aUart},
++    io::IoMem,
++    mm::VmIoOnce,
++    sync::SpinLock,
++};
++use spin::Once;
++
++use crate::console::{Uart, UartConsole};
++
++pub(super) const FDT_COMPATIBLES: [&str; 3] = [
++    "intel,xscale-uart",
++    "spacemit,k1-uart",
++    "spacemit,pxa-uart",
++];
++
++const REGISTER_STRIDE: usize = 4;
++const REGISTER_SPAN: usize = (Ns16550aRegister::MAX as usize + 1) * REGISTER_STRIDE;
++const UART_UNIT_ENABLE: u8 = 1 << 6;
++const RECEIVE_DATA_INTERRUPT: u8 = 1;
++const LINE_CONTROL_8N1: u8 = 3;
++const FIFO_ENABLE_AND_RESET: u8 = 7;
++const MODEM_CONTROL_DTR_RTS_OUT2: u8 = 0x0b;
++
++struct SerialAccess {
++    io_mem: IoMem,
++}
++
++impl Ns16550aAccess for SerialAccess {
++    fn read(&self, reg: Ns16550aRegister) -> u8 {
++        self.io_mem
++            .read_once::<u32>(reg as usize * REGISTER_STRIDE)
++            .unwrap() as u8
++    }
++
++    fn write(&mut self, reg: Ns16550aRegister, val: u8) {
++        self.io_mem
++            .write_once(reg as usize * REGISTER_STRIDE, &u32::from(val))
++            .unwrap();
++    }
++}
++
++static IRQ_LINE: Once<MappedIrqLine> = Once::new();
++
++pub(super) fn init(fdt_node: FdtNode) {
++    let Some([io_mem]) = fdt_node.acquire_io_mems([REGISTER_SPAN]) else {
++        return;
++    };
++    let Some([mut irq_line]) = fdt_node.acquire_irq_lines() else {
++        return;
++    };
++    let mut access = SerialAccess { io_mem };
++
++    // Clock and pinmux setup belongs to the firmware. Preserve its divisor
++    // instead of assuming the fixed 1.8432 MHz clock of the QEMU UART.
++    access.write(Ns16550aRegister::LineCtrl, LINE_CONTROL_8N1);
++    access.write(Ns16550aRegister::IntEnOrDivisorHi, UART_UNIT_ENABLE);
++    access.write(Ns16550aRegister::FifoCtrl, FIFO_ENABLE_AND_RESET);
++    access.write(Ns16550aRegister::ModemCtrl, MODEM_CONTROL_DTR_RTS_OUT2);
++    access.write(
++        Ns16550aRegister::IntEnOrDivisorHi,
++        UART_UNIT_ENABLE | RECEIVE_DATA_INTERRUPT,
++    );
++
++    // NS16550A byte I/O is shared, but its initialization would clear UUE
++    // and replace the inherited divisor, so do not call `uart.init()`.
++    let uart = Ns16550aUart::new(access);
++    let uart_console = UartConsole::new(SpinLock::new(uart));
++
++    aster_console::register_device(
++        aster_console::UART_CONSOLE_NAME.to_string(),
++        uart_console.clone(),
++    );
++
++    let cloned_uart_console = uart_console.clone();
++    irq_line.on_active(move |_| cloned_uart_console.trigger_input_callbacks());
++    IRQ_LINE.call_once(move || irq_line);
++    uart_console.uart().flush();
++
++    ostd::info!("Registered XScale/PXA UART as a console");
++}

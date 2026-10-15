@@ -1,0 +1,33 @@
+schema = 1
+arch = "riscv64"
+
+[packages.spacemit-fsbl]
+config = "boards/spacemit/muse-card/fsbl_defconfig"
+
+[packages.rustsbi]
+config = "boards/spacemit/muse-card/rustsbi.toml"
+artifact = "rustsbi.bin"
+build_output = "${source}/target/${target}/release/rustsbi-prototyper-dynamic.bin"
+
+[packages.rustsbi.cargo]
+cwd = "${source}"
+
+[packages.rustsbi.cargo.env]
+CARGO_TARGET_DIR = "${source}/target"
+# Keep the SBI payload within the official 192 KiB firmware partition.
+CARGO_PROFILE_RELEASE_OPT_LEVEL = "z"
+CARGO_PROFILE_RELEASE_LTO = "fat"
+CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "1"
+CARGO_PROFILE_RELEASE_DEBUG = "false"
+
+[packages.asterinas]
+# PR #3872 discovers the raw image's runtime load address (0x400000).
+# The ELF retains its default addresses; the loader must use the raw image.
+args = [
+    "build", "--locked", "--release", "--package", "asterinas-osdk-bin",
+    "--features", "asterinas/riscv_sv39_mode",
+    "--target", "${target}",
+    "--target-dir", "${work}/target",
+    "-Zbuild-std=core,alloc,compiler_builtins",
+    "-Zbuild-std-features=compiler-builtins-mem",
+]

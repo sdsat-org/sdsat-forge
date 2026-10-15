@@ -1,0 +1,24 @@
+Subject: [PATCH] vm: flush the faulting page after fault-around
+
+Fault-around may populate a nearby page or find it already mapped. CPUs
+that cache invalid page-table entries can otherwise repeatedly fault on
+that page even though its permissions allow the access. Flush the faulting
+page on the current CPU, as the single-page fault handler already does.
+Also flush after a neighboring page fails: the faulting page may already
+be mapped, and the caller can then return success despite that error.
+
+---
+diff --git a/kernel/core/src/vm/vmar/vm_mapping.rs b/kernel/core/src/vm/vmar/vm_mapping.rs
+--- a/kernel/core/src/vm/vmar/vm_mapping.rs
++++ b/kernel/core/src/vm/vmar/vm_mapping.rs
+@@ -393,6 +393,10 @@ impl VmMapping {
+                 rss_delta,
+             );
+ 
++            // Fault-around may have installed mappings even if a neighboring page failed.
++            TlbFlushOp::for_range(page_aligned_addr..page_aligned_addr + PAGE_SIZE)
++                .perform_on_current();
++
+             // Errors caused by the "around" pages should be ignored, so here we
+             // only return the error if the faulting page is still not mapped.
+             if res.is_err() {

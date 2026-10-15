@@ -1,0 +1,85 @@
+Subject: [PATCH] Serialize RISC-V hart startup with an online handshake
+
+SBI hart_start is asynchronous. Wait for the requested hardware hart to
+report online before starting the next one, as Linux does during CPU
+bring-up. Bound the wait and report the hardware hart ID and SBI state on
+failure. This avoids the MUSE-Card startup hang observed with concurrent
+requests when INFO logging is disabled, without introducing fixed delays.
+
+diff --git a/ostd/src/arch/riscv/boot/smp.rs b/ostd/src/arch/riscv/boot/smp.rs
+index 50602e6..df4245e 100644
+--- a/ostd/src/arch/riscv/boot/smp.rs
++++ b/ostd/src/arch/riscv/boot/smp.rs
+@@ -100,15 +100,29 @@ unsafe fn bringup_ap(hart_id: u32) {
+         /* Unused */ 0,
+     );
+ 
+-    if result.error == 0 {
+-        crate::debug!("Successfully started hart {}", hart_id);
+-    } else {
+-        crate::error!(
+-            "Failed to start hart {}: error code {}",
+-            hart_id,
+-            result.error
+-        );
++    assert_eq!(
++        result.error, 0,
++        "SBI hart_start failed for hardware hart {}",
++        hart_id
++    );
++
++    // SBI success only means the asynchronous start request was accepted.
++    // Wait until this exact hardware hart has completed OSTD initialization
++    // before asking the firmware to start another hart.
++    let start = crate::arch::read_tsc();
++    let timeout_ticks = crate::arch::tsc_freq().saturating_mul(5);
++    while !crate::boot::smp::is_hart_started(hart_id) {
++        if crate::arch::read_tsc().wrapping_sub(start) >= timeout_ticks {
++            let status = sbi_rt::hart_get_status(hart_id as usize);
++            panic!(
++                "Timed out waiting for hardware hart {} to come online: SBI HSM error={}, state={}",
++                hart_id, status.error, status.value
++            );
++        }
++        core::hint::spin_loop();
+     }
++
++    crate::debug!("Hardware hart {} is online", hart_id);
+ }
+ 
+ /// Fills the AP boot info array pointer.
+diff --git a/ostd/src/arch/riscv/irq/ipi.rs b/ostd/src/arch/riscv/irq/ipi.rs
+index 46582ec..320c63a 100644
+--- a/ostd/src/arch/riscv/irq/ipi.rs
++++ b/ostd/src/arch/riscv/irq/ipi.rs
+@@ -11,6 +11,10 @@ use crate::{cpu::PinCurrentCpu, error::Error, irq::IrqLine, prelude::Result};
+ pub(crate) struct HwCpuId(u32);
+ 
+ impl HwCpuId {
++    pub(crate) const fn as_u32(self) -> u32 {
++        self.0
++    }
++
+     pub(crate) fn read_current(_guard: &dyn PinCurrentCpu) -> Self {
+         // No races because of `_guard`.
+         Self(crate::arch::boot::smp::get_current_hart_id())
+diff --git a/ostd/src/boot/smp.rs b/ostd/src/boot/smp.rs
+index 8be5d27..246a2c7 100644
+--- a/ostd/src/boot/smp.rs
++++ b/ostd/src/boot/smp.rs
+@@ -194,6 +194,15 @@ fn report_online_and_hw_cpu_id(cpu_id: u32) {
+     assert!(old_val.is_none());
+ }
+ 
++/// Checks the hardware hart ID, rather than its arrival-order logical CPU ID.
++#[cfg(target_arch = "riscv64")]
++pub(crate) fn is_hart_started(hart_id: u32) -> bool {
++    HW_CPU_ID_MAP
++        .lock()
++        .values()
++        .any(|id| id.as_u32() == hart_id)
++}
++
+ fn wait_for_all_aps_started(num_cpus: usize) {
+     fn is_all_aps_started(num_cpus: usize) -> bool {
+         HW_CPU_ID_MAP.lock().len() == num_cpus

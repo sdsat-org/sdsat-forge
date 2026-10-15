@@ -1,0 +1,23 @@
+Subject: [PATCH] riscv: synchronize boot frame metadata mappings
+
+The boot page table creates both non-leaf entries and global leaf entries
+for frame metadata. Synchronize those page-table writes before accessing
+the metadata, including cached invalid entries. A full local SFENCE.VMA
+is needed because the new mappings may traverse newly installed tables.
+
+---
+diff --git a/ostd/src/mm/frame/meta.rs b/ostd/src/mm/frame/meta.rs
+--- a/ostd/src/mm/frame/meta.rs
++++ b/ostd/src/mm/frame/meta.rs
+@@ -492,6 +492,11 @@ pub(crate) unsafe fn init() -> Segment<MetaPageMeta> {
+     })
+     .unwrap();
+ 
++    // Publish the new non-leaf and global leaf entries before using metadata.
++    // RISC-V may cache invalid entries, including intermediate page-table walks.
++    #[cfg(target_arch = "riscv64")]
++    crate::arch::mm::tlb_flush_all_including_global();
++
+     // Now the metadata frames are mapped, we can initialize the metadata.
+     super::MIN_PADDR.store(min_paddr, Ordering::Relaxed);
+     super::MAX_PADDR.store(max_paddr, Ordering::Relaxed);

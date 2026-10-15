@@ -1,0 +1,366 @@
+From 532b74b41831b93ac2d10d20d440e862865d0fd3 Mon Sep 17 00:00:00 2001
+From: Zhouqi Jiang <luojia@rustsbi.com>
+Date: Sun, 20 Sep 2026 11:24:24 +0800
+Subject: [PATCH] Support runtime physical load addresses on RISC-V
+
+Keep the kernel virtual layout fixed and compute the physical-to-virtual
+offset during boot. Build the bootstrap kernel mapping for the actual
+load address and use the same offset for AP startup and final mappings.
+
+This allows one raw kernel image to boot at different supported
+2 MiB-aligned physical addresses.
+
+Signed-off-by: Zhouqi Jiang <luojia@rustsbi.com>
+Upstream-PR: https://github.com/asterinas/asterinas/pull/3872
+---
+ osdk/src/base_crate/riscv64.ld.template | 19 ++---
+ ostd/src/arch/riscv/boot/ap_boot.S      | 15 ++--
+ ostd/src/arch/riscv/boot/bsp_boot.S     | 94 ++++++++++++++++++++-----
+ ostd/src/arch/riscv/boot/smp.rs         | 19 ++---
+ ostd/src/mm/kspace/mod.rs               | 23 ++++--
+ 5 files changed, 118 insertions(+), 52 deletions(-)
+
+diff --git a/osdk/src/base_crate/riscv64.ld.template b/osdk/src/base_crate/riscv64.ld.template
+index c0751b93a..3c2d41c62 100644
+--- a/osdk/src/base_crate/riscv64.ld.template
++++ b/osdk/src/base_crate/riscv64.ld.template
+@@ -1,20 +1,22 @@
+-ENTRY(_start)
++ENTRY(_start_phys)
+ OUTPUT_ARCH(riscv)
+ 
++/* Default ELF load address. A raw image may be loaded at any supported
++ * 2 MiB-aligned physical address without changing its virtual addresses. */
+ KERNEL_LMA = 0x80200000;
+ KERNEL_VMA = 0xffffffff80200000;
+ KERNEL_VMA_OFFSET = KERNEL_VMA - KERNEL_LMA;
+ 
+ SECTIONS
+ {
+-    # First, we use physical addresses for the boot sections.
+-    . = KERNEL_LMA;
++    # All sections share one virtual layout, including the MMU-off entry code.
++    . = KERNEL_VMA;
+ 
+-    __kernel_start = . + KERNEL_VMA_OFFSET;
++    __kernel_start = .;
+ 
+     PROVIDE(__executable_start = __kernel_start);
+ 
+-    .boot                   : AT(ADDR(.boot)) {
++    .boot                   : AT(ADDR(.boot) - KERNEL_VMA_OFFSET) {
+         KEEP(*(.boot))
+         # FIXME: We want to create a separate .boot.stack section so that the
+         # executable doesn't contain the boot stack (which is just hundreds of
+@@ -29,9 +31,6 @@ SECTIONS
+         . = ALIGN(4096);
+     }
+ 
+-    # Then, we switch to virtual addresses for all the other sections.
+-    . += KERNEL_VMA_OFFSET;
+-
+     .text                   : AT(ADDR(.text) - KERNEL_VMA_OFFSET) {
+         *(.text .text.*)
+         PROVIDE(__etext = .);
+@@ -104,4 +103,8 @@ SECTIONS
+     }
+ 
+     __kernel_end = .;
++    _start_phys = LOADADDR(.boot);
++
++    # The bootstrap uses one level-2 table for the kernel image.
++    ASSERT(__kernel_end <= 0xffffffffc0000000, "RISC-V kernel exceeds boot mapping")
+ }
+diff --git a/ostd/src/arch/riscv/boot/ap_boot.S b/ostd/src/arch/riscv/boot/ap_boot.S
+index e39fcb8d0..41c2b19ce 100644
+--- a/ostd/src/arch/riscv/boot/ap_boot.S
++++ b/ostd/src/arch/riscv/boot/ap_boot.S
+@@ -6,13 +6,15 @@ SATP_MODE_SV39         = 8 << 60
+ SATP_MODE_SV48         = 9 << 60
+ SATP_PPN_SHIFT         = 0
+ PAGE_SHIFT             = 12
+-KERNEL_VMA_OFFSET      = 0xffffffff00000000
+ 
+ # This is to workaround <https://github.com/rust-lang/rust/issues/80608>.
+ .attribute arch, "rv64imac"
+ 
+ .section ".ap_boot", "awx", @progbits
+ 
++.option push
++.option norelax
++
+ .balign 4096
+ .global ap_boot_start
+ ap_boot_start:
+@@ -25,7 +27,7 @@ ap_boot_start:
+     mv      t4, a0
+ 
+     # Load the page table address in Sv48 mode and set SATP.
+-    lla     t0, __ap_boot_page_table_pointer - KERNEL_VMA_OFFSET
++    lla     t0, __ap_boot_page_table_pointer
+     ld      t1, 0(t0)                   # Load page table physical address.
+     li      t2, SATP_MODE_SV48          # Sv48 mode.
+     srli    t1, t1, PAGE_SHIFT - SATP_PPN_SHIFT
+@@ -58,9 +60,10 @@ ap_flush_tlb:
+ 
+     # Now we need to switch to virtual addressing.
+     # Calculate virtual address using the same method as boot.S.
+-    li      t1, KERNEL_VMA_OFFSET
+-    lla     sp, ap_boot_virtual - KERNEL_VMA_OFFSET
+-    or      sp, sp, t1
++    lla     t1, __riscv_kernel_loaded_offset
++    ld      t1, 0(t1)
++    lla     sp, ap_boot_virtual
++    add     sp, sp, t1
+     jr      sp
+ 
+ # From here, we're in the canonical virtual address space instead of linear
+@@ -107,6 +110,8 @@ ap_cmpxchg_load:
+     ld      sp, 0(t3)                   # Load stack_top.
+     ld      gp, 8(t3)                   # Load cpu_local pointer.
+ 
++.option pop
++
+     # Clear frame pointer for clean stack traces.
+     li      fp, 0
+ 
+diff --git a/ostd/src/arch/riscv/boot/bsp_boot.S b/ostd/src/arch/riscv/boot/bsp_boot.S
+index 82e50e5d3..ec6f20dc9 100644
+--- a/ostd/src/arch/riscv/boot/bsp_boot.S
++++ b/ostd/src/arch/riscv/boot/bsp_boot.S
+@@ -12,16 +12,24 @@ PTE_W                  = 0x04
+ PTE_X                  = 0x08
+ PTE_A                  = 0x40
+ PTE_D                  = 0x80
++PTE_VRWXAD             = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D
+ PTE_PPN_SHIFT          = 10
+ PTE_SIZE               = 8
+ 
+ PAGE_SHIFT             = 12
+ 
+-KERNEL_VMA_OFFSET      = 0xffffffff00000000
++L2_PAGE_SHIFT          = 21
++
++# The Sv39 boot page table identity-maps the first 128 GiB.
++BOOT_IDENTITY_MAP_SIZE = 128 << 30
+ 
+ .section ".boot", "awx", @progbits
+ 
+-# `_start` is also the entrypoint specified in the linker script.
++# Use PC-relative addressing until virtual memory and GP are initialized.
++.option push
++.option norelax
++
++# The ELF entry is the default physical address of `_start`.
+ .global _start
+ _start:
+     # Arguments passed from SBI:
+@@ -29,6 +37,47 @@ _start:
+     #   a1 = device tree paddr
+     # We do not touch them here. They are passed to the Rust entrypoint `riscv_boot`.
+ 
++    # Discover the physical load address. Keep the existing Sv39 identity-map
++    # limit (128 GiB) and require alignment for the 2 MiB kernel leaves.
++    lla    t0, _start
++    li     t1, (1 << L2_PAGE_SHIFT) - 1
++    and    t1, t0, t1
++    bnez   t1, bsp_unreachable_pa
++    lla    t2, __kernel_end
++    li     t1, BOOT_IDENTITY_MAP_SIZE
++    bgtu   t2, t1, bsp_unreachable_pa
++
++    # Unlike LLA, the literal contains the fixed linked virtual address.
++    lla    t1, bsp_kernel_vaddr
++    ld     t1, 0(t1)
++    sub    t1, t1, t0
++    lla    t3, __riscv_kernel_loaded_offset
++    sd     t1, 0(t3)
++
++    # Map the image at 0xffffffff80200000, starting at level-2 index 1.
++    lla    t3, bsp_boot_l2pt
++    addi   t3, t3, PTE_SIZE
++    li     t4, 1 << L2_PAGE_SHIFT
++bsp_map_kernel:
++    srli   t1, t0, PAGE_SHIFT - PTE_PPN_SHIFT
++    ori    t1, t1, PTE_VRWXAD
++    sd     t1, 0(t3)
++    addi   t3, t3, PTE_SIZE
++    add    t0, t0, t4
++    bltu   t0, t2, bsp_map_kernel
++
++    # Both paging modes use the same level-2 kernel table.
++    lla    t0, bsp_boot_l2pt
++    srli   t0, t0, PAGE_SHIFT - PTE_PPN_SHIFT
++    ori    t0, t0, PTE_V
++    li     t2, 510 * PTE_SIZE
++    lla    t1, sv39_boot_l3pt
++    add    t1, t1, t2
++    sd     t0, 0(t1)
++    lla    t1, sv48_boot_l3pt
++    add    t1, t1, t2
++    sd     t0, 0(t1)
++
+     # Set up the Sv48 page table.
+     #   sv48_boot_l4pt[511] = (PPN(sv48_boot_l3pt) << PTE_PPN_SHIFT) | PTE_V
+     lla    t1, sv48_boot_l4pt
+@@ -39,6 +88,9 @@ _start:
+     ori    t0, t0, PTE_V
+     sd     t0, 0(t1)
+ 
++    # Make the newly written page tables visible to the page-table walker.
++    sfence.vma
++
+     # Try loading the Sv48 page table.
+     lla    t0, sv48_boot_l4pt
+     li     t1, SATP_MODE_SV48
+@@ -70,14 +122,22 @@ bsp_flush_tlb:
+     sfence.vma
+ 
+     # Update SP/PC to use the virtual address.
+-    li     t1, KERNEL_VMA_OFFSET
++    lla    t1, __riscv_kernel_loaded_offset
++    ld     t1, 0(t1)
+     lla    sp, boot_stack_top
+-    or     sp, sp, t1
+-    lla    t0, bsp_boot_virt - KERNEL_VMA_OFFSET
+-    or     t0, t0, t1
++    add    sp, sp, t1
++    lla    t0, bsp_boot_virt
++    add    t0, t0, t1
+     jr     t0
+ 
+-PTE_VRWXAD = PTE_V | PTE_R | PTE_W | PTE_X | PTE_A | PTE_D
++.balign 8
++bsp_kernel_vaddr:
++    .quad __kernel_start
++
++# Written once by the BSP before entering Rust; read by all harts afterwards.
++.global __riscv_kernel_loaded_offset
++__riscv_kernel_loaded_offset:
++    .quad 0
+ 
+ .balign 4096
+ sv48_boot_l4pt:
+@@ -86,12 +146,8 @@ sv48_boot_l4pt:
+     .quad (0x0 << PTE_PPN_SHIFT) | PTE_VRWXAD  # linear 0~512 GiB
+     .zero 254 * PTE_SIZE
+     .quad 0                                    # TBA (-> boot_l3pt)
+-sv48_boot_l3pt:  # 0xffff_ffff_0000_0000 -> 0x0000_0000_0000_0000
+-    .zero 508 * PTE_SIZE
+-    .quad (0x00000 << PTE_PPN_SHIFT) | PTE_VRWXAD  # code 0~1 GiB
+-    .quad (0x40000 << PTE_PPN_SHIFT) | PTE_VRWXAD  # code 1~2 GiB
+-    .quad (0x80000 << PTE_PPN_SHIFT) | PTE_VRWXAD  # code 2~3 GiB
+-    .quad 0
++sv48_boot_l3pt:
++    .zero 512 * PTE_SIZE  # Entry 510 is filled with bsp_boot_l2pt.
+ 
+ .balign 4096
+ sv39_boot_l3pt:
+@@ -106,11 +162,11 @@ sv39_boot_l3pt:
+         .quad ((i * 0x40000) << PTE_PPN_SHIFT) | PTE_VRWXAD
+         .set i, i + 1
+     .endr
+-    .zero 124 * PTE_SIZE
+-    .quad (0x00000 << PTE_PPN_SHIFT) | PTE_VRWXAD  # code 0~1 GiB
+-    .quad (0x40000 << PTE_PPN_SHIFT) | PTE_VRWXAD  # code 1~2 GiB
+-    .quad (0x80000 << PTE_PPN_SHIFT) | PTE_VRWXAD  # code 2~3 GiB
+-    .quad 0
++    .zero 128 * PTE_SIZE  # Entry 510 is filled with bsp_boot_l2pt.
++
++.balign 4096
++bsp_boot_l2pt:
++    .zero 512 * PTE_SIZE
+ 
+ .section ".boot.stack", "aw", @nobits
+ 
+@@ -142,6 +198,8 @@ bsp_zero_bss_end:
+ .extern __cpu_local_start
+     lla    gp, __cpu_local_start
+ 
++.option pop
++
+     # Jump into Rust code.
+     lla    t0, riscv_boot
+     jr     t0
+diff --git a/ostd/src/arch/riscv/boot/smp.rs b/ostd/src/arch/riscv/boot/smp.rs
+index 2eae0a36c..50602e6c9 100644
+--- a/ostd/src/arch/riscv/boot/smp.rs
++++ b/ostd/src/arch/riscv/boot/smp.rs
+@@ -7,7 +7,7 @@ use core::arch::global_asm;
+ use crate::{
+     boot::smp::{PerApRawInfo, ap_early_entry},
+     cpu_local_cell,
+-    mm::{Paddr, Vaddr},
++    mm::{Paddr, kspace::kernel_loaded_offset},
+ };
+ 
+ // Include the AP boot assembly code
+@@ -146,22 +146,11 @@ unsafe fn fill_boot_page_table_ptr(pt_ptr: Paddr) {
+ }
+ 
+ fn get_ap_boot_start_addr() -> Paddr {
+-    const KERNEL_VMA: Vaddr = 0xffffffff00000000;
+-
+-    let addr: Paddr;
+-
+-    // We need to load the address of the symbol in assembly to avoid the
+-    // linker relocation error. The symbol is not reachable using IP-offset
+-    // addressing without the virtual offset.
+-    unsafe {
+-        core::arch::asm!(
+-            "la {0}, ap_boot_start + {1}",
+-            out(reg) addr,
+-            const KERNEL_VMA,
+-        );
++    unsafe extern "C" {
++        fn ap_boot_start();
+     }
+ 
+-    addr - KERNEL_VMA
++    ap_boot_start as *const () as usize - kernel_loaded_offset()
+ }
+ 
+ fn get_bootstrap_hart_id() -> u32 {
+diff --git a/ostd/src/mm/kspace/mod.rs b/ostd/src/mm/kspace/mod.rs
+index c6d17066a..325aacb2b 100644
+--- a/ostd/src/mm/kspace/mod.rs
++++ b/ostd/src/mm/kspace/mod.rs
+@@ -93,18 +93,29 @@ pub const MAX_USERSPACE_VADDR: Vaddr = (0x0000_0040_0000_0000 << ADDR_WIDTH_SHIF
+ /// address space, with the most significant bits in the addresses set).
+ pub const KERNEL_VADDR_RANGE: Range<Vaddr> = KERNEL_BASE_VADDR..KERNEL_END_VADDR;
+ 
+-/// The kernel code is linear mapped to this address.
++/// The offset from physical addresses to kernel image virtual addresses.
+ ///
+-/// FIXME: This offset should be randomly chosen by the loader or the
+-/// boot compatibility layer. But we disabled it because OSTD
+-/// doesn't support relocatable kernel yet.
++/// On RISC-V, the bootstrap computes this offset from the actual load address.
++/// Other architectures currently use a fixed offset.
+ pub(crate) fn kernel_loaded_offset() -> usize {
+-    KERNEL_CODE_BASE_VADDR
++    #[cfg(target_arch = "riscv64")]
++    {
++        unsafe extern "C" {
++            static __riscv_kernel_loaded_offset: usize;
++        }
++        // SAFETY: The BSP initializes this value before entering Rust, and it
++        // is never modified afterwards. APs are started after initialization.
++        unsafe { __riscv_kernel_loaded_offset }
++    }
++    #[cfg(not(target_arch = "riscv64"))]
++    {
++        KERNEL_CODE_BASE_VADDR
++    }
+ }
+ 
+ #[cfg(target_arch = "x86_64")]
+ const KERNEL_CODE_BASE_VADDR: usize = 0xffff_ffff_8000_0000;
+-#[cfg(any(target_arch = "riscv64", target_arch = "aarch64"))]
++#[cfg(target_arch = "aarch64")]
+ const KERNEL_CODE_BASE_VADDR: usize = 0xffff_ffff_0000_0000;
+ #[cfg(target_arch = "loongarch64")]
+ const KERNEL_CODE_BASE_VADDR: usize = 0x9000_0000_0000_0000;
+-- 
+2.53.0.windows.2
+
