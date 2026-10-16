@@ -3,4 +3,3 @@ name = "qemu_riscv64_asterinas"
 board = "qemu/virt-riscv64"
 profile = "asterinas-busybox"
 packages = ["rustsbi", "asterinas", "busybox", "runc-asterinas", "kubernetes"]
-lock = "locks/qemu_riscv64_asterinas.lock.toml"

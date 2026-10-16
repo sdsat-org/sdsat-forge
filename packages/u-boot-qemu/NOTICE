@@ -5,7 +5,7 @@ This binary is not a firmware image for physical RISC-V boards.
 Binary archive:
 https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/riscv64/alpine-uboot-3.23.5-riscv64.tar.gz
 Member: u-boot/qemu-riscv64_smode/u-boot.bin
-SHA256: 8c23fc5f09dab57fa081a462cb352eadf7af672fc750ea7996c3407bca9940e2
+Member SHA256: 8c23fc5f09dab57fa081a462cb352eadf7af672fc750ea7996c3407bca9940e2
 
 The exported source archive, Alpine APKBUILD and patch describe this build.
 See LICENSE.u-boot-qemu and the source archive's Licenses/README for licensing.

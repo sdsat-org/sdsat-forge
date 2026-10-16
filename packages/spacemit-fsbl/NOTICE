@@ -1,9 +1,9 @@
 SpacemiT K1 first-stage bootloader
 
 Source: https://github.com/spacemit-com/uboot-2022.10
-Commit: 7f51f4453f9811eeaafbdd839b1bf1b0cc27a413
+Release: k1-bl-v2.2.11-release
 License: GPL-2.0-or-later (see LICENSE.spacemit-fsbl).
 
 Exports the vendor SPL in its FSBL container, using the board's official
-k1_defconfig. This source includes the LPDDR4X training fixes released after
-the v2.2.11 prebuilt image. Full U-Boot remains a separate prebuilt package.
+k1_defconfig. The shared U-Boot patch set backports the subsequent LPDDR4X
+training and QSPI fixes. The u-boot-spacemit-k1 package builds U-Boot separately.

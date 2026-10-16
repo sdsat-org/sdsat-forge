@@ -1,7 +1,7 @@
 use crate::{
     config::{self, Board, Preset, Profile, Recipe, Rootfs},
     image::{self, QemuOptions},
-    source::{self, SourceLock},
+    source::{self, Source},
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ pub struct Build {
     pub board: Board,
     pub profile: Profile,
     recipes: BTreeMap<String, Recipe>,
-    sources: SourceLock,
+    sources: BTreeMap<String, Source>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,7 +104,9 @@ impl Build {
         let output = root.join("output").join(&name);
         let active = output.join(".config.toml");
         let preset: Preset = if active.exists() {
-            config::read(&active)?
+            config::read(&active).with_context(|| {
+                format!("invalid active configuration; run forge defconfig {name} to reset it")
+            })?
         } else {
             config::load_preset(&root, &name)?
         };
@@ -133,8 +135,8 @@ impl Build {
                 || (board.rootfs_files.is_empty() && profile.rootfs_files.is_empty()),
             "external rootfs does not support board or profile rootfs_files; deploy additional files to the target storage separately"
         );
-        let sources = source::load_lock(&config::input_path(&root, &preset.lock)?)?;
         let recipes = config::recipes(&root, &preset, &board)?;
+        let sources = source::load_packages(&root, &recipes)?;
         let mut rootfs_paths = BTreeSet::new();
         for (path, file) in board.rootfs_files.iter().chain(&profile.rootfs_files) {
             ensure!(
@@ -158,17 +160,6 @@ impl Build {
         }
         let mut artifacts = BTreeSet::from(["initramfs.cpio"]);
         for recipe in recipes.values() {
-            ensure!(
-                sources.sources.contains_key(&recipe.source),
-                "unlocked source {}",
-                recipe.source
-            );
-            for source in recipe.extra_sources.values() {
-                ensure!(
-                    sources.sources.contains_key(source),
-                    "unlocked extra source {source}"
-                );
-            }
             for artifact in std::iter::once(&recipe.artifact).chain(recipe.artifacts.values()) {
                 ensure!(
                     artifacts.insert(artifact),
@@ -180,12 +171,6 @@ impl Build {
             }
             if let Some(path) = &recipe.config {
                 config::input_path(&root, path)?;
-            }
-            if let Some(toolchain) = &recipe.toolchain {
-                ensure!(
-                    sources.sources.contains_key(toolchain),
-                    "unlocked toolchain {toolchain}"
-                );
             }
             if recipe.backend == "kbuild" {
                 ensure!(
@@ -282,10 +267,7 @@ impl Build {
         );
         for name in self.order(None)? {
             let recipe = &self.recipes[&name];
-            println!(
-                "  {name}: {} [{}]",
-                self.sources.sources[&recipe.source].version, recipe.backend
-            );
+            println!("  {name}: {} [{}]", recipe.version, recipe.backend);
         }
         let stages = std::iter::once(self.profile.firmware.as_str())
             .chain(self.profile.bootloader.as_deref())
@@ -389,11 +371,16 @@ impl Build {
     pub fn fetch_all(&self) -> Result<()> {
         for name in self.order(None)? {
             let recipe = &self.recipes[&name];
-            for input in std::iter::once(&recipe.source)
-                .chain(recipe.toolchain.iter())
-                .chain(recipe.extra_sources.values())
+            for input in std::iter::once(name.clone())
+                .chain(recipe.toolchain.iter().cloned())
+                .chain(
+                    recipe
+                        .extra_sources
+                        .keys()
+                        .map(|alias| source::extra_key(&name, alias)),
+                )
             {
-                source::fetch(&self.sources.sources[input], &self.root.join("dl"))?;
+                source::fetch(&self.sources[&input], &self.root.join("dl"))?;
             }
         }
         Ok(())
@@ -408,9 +395,7 @@ impl Build {
     }
 
     fn source_dir(&self, name: &str) -> Result<PathBuf> {
-        let mut key = self.sources.sources[&self.recipes[name].source]
-            .sha256
-            .clone();
+        let mut key = self.sources[name].sha256.clone();
         for patch in self.patch_paths(name)? {
             key.push_str(&digest_file(&patch)?);
         }
@@ -423,10 +408,7 @@ impl Build {
 
     fn prepare_source(&self, name: &str) -> Result<PathBuf> {
         let source = self.source_dir(name)?;
-        let archive = source::fetch(
-            &self.sources.sources[&self.recipes[name].source],
-            &self.root.join("dl"),
-        )?;
+        let archive = source::fetch(&self.sources[name], &self.root.join("dl"))?;
         source::extract(&archive, &source)?;
         for (index, patch) in self.patch_paths(name)?.iter().enumerate() {
             let marker = source.join(format!(".forge-applied-{index}"));
@@ -460,7 +442,7 @@ impl Build {
     fn fingerprint(&self, name: &str) -> Result<String> {
         let mut data = serde_json::to_vec(&(
             &self.recipes[name],
-            &self.sources.sources[&self.recipes[name].source],
+            &self.sources[name],
             &self.board,
             &self.profile.toolchain,
         ))?;
@@ -481,14 +463,16 @@ impl Build {
         if recipe.backend == "prebuilt" {
             data.extend_from_slice(include_bytes!("backend/prebuilt.rs"));
         }
-        for source in recipe.extra_sources.values() {
-            data.extend(serde_json::to_vec(&self.sources.sources[source])?);
+        for alias in recipe.extra_sources.keys() {
+            data.extend(serde_json::to_vec(
+                &self.sources[&source::extra_key(name, alias)],
+            )?);
         }
         if let Some(path) = &recipe.config {
             data.extend(fs::read(config::input_path(&self.root, path)?)?);
         }
         if let Some(toolchain) = &recipe.toolchain {
-            data.extend(serde_json::to_vec(&self.sources.sources[toolchain])?);
+            data.extend(serde_json::to_vec(&self.sources[toolchain])?);
         }
         data.extend_from_slice(std::env::consts::OS.as_bytes());
         data.extend_from_slice(std::env::consts::ARCH.as_bytes());
@@ -527,7 +511,6 @@ impl Build {
                     .map(|name| format!("images/{name}")),
             );
             paths.insert("manifests/build.json".into());
-            paths.insert("resolved.lock.toml".into());
         }
         Ok(paths.into_iter().collect())
     }
@@ -554,7 +537,7 @@ impl Build {
                 || !recipe.extract
                 || (recipe.backend == "prebuilt" && recipe.file.is_none())
             {
-                source::fetch(&self.sources.sources[&recipe.source], &self.root.join("dl"))?
+                source::fetch(&self.sources[&name], &self.root.join("dl"))?
             } else {
                 self.prepare_source(&name)?
             };
@@ -589,7 +572,7 @@ impl Build {
                     recipe,
                     &source,
                     &source::fetch(
-                        &self.sources.sources[recipe.toolchain.as_ref().unwrap()],
+                        &self.sources[recipe.toolchain.as_ref().unwrap()],
                         &self.root.join("dl"),
                     )?,
                     &config::input_path(&self.root, recipe.config.as_deref().unwrap())?,
@@ -603,9 +586,7 @@ impl Build {
                     recipe
                         .toolchain
                         .as_ref()
-                        .map(|name| {
-                            source::fetch(&self.sources.sources[name], &self.root.join("dl"))
-                        })
+                        .map(|name| source::fetch(&self.sources[name], &self.root.join("dl")))
                         .transpose()?
                         .as_deref(),
                 )?,
@@ -649,10 +630,6 @@ impl Build {
                     ))
                 })
                 .collect::<Result<_>>()?;
-            publish(
-                &self.output.join("resolved.lock.toml"),
-                toml::to_string_pretty(&self.sources)?.as_bytes(),
-            )?;
             publish(
                 &manifest,
                 &serde_json::to_vec_pretty(&Manifest {
@@ -755,10 +732,6 @@ impl Build {
                 self.prepare_rootfs()?;
             }
             publish(
-                &self.output.join("resolved.lock.toml"),
-                toml::to_string_pretty(&self.sources)?.as_bytes(),
-            )?;
-            publish(
                 &manifest,
                 &serde_json::to_vec_pretty(&Manifest {
                     inputs: self.inputs_digest()?,
@@ -787,6 +760,7 @@ impl Build {
             ("work".into(), path_text(work)?),
             ("images".into(), path_text(&self.output.join("images"))?),
             ("toolchain".into(), self.profile.toolchain.clone()),
+            ("version".into(), recipe.version.clone()),
         ]);
         if let Some(target) = &recipe.target {
             variables.insert("target".into(), target.clone());
@@ -803,8 +777,11 @@ impl Build {
                 path_text(&self.artifact(dependency))?,
             );
         }
-        for (alias, source) in &recipe.extra_sources {
-            let archive = source::fetch(&self.sources.sources[source], &self.root.join("dl"))?;
+        for alias in recipe.extra_sources.keys() {
+            let archive = source::fetch(
+                &self.sources[&source::extra_key(&recipe.name, alias)],
+                &self.root.join("dl"),
+            )?;
             variables.insert(format!("extra.{alias}"), path_text(&archive)?);
         }
         Ok(variables)

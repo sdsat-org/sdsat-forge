@@ -1,7 +1,8 @@
 schema = 1
 name = "kubernetes"
 backend = "prebuilt"
-source = "kubernetes"
+version = "v1.38.0-alpha.0-sdsat.48f5417.1"
+url = "https://github.com/sdsat-org/kubernetes/releases/download/${version}/kubernetes-${version}-linux-riscv64.tar.gz"
 dependencies = ["etcd", "containerd"]
 inputs = [
     "support/kubernetes/start.sh", "support/kubernetes/check.sh",

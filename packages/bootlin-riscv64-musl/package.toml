@@ -1,0 +1,8 @@
+schema = 1
+name = "bootlin-riscv64-musl"
+backend = "prebuilt"
+# Linux x86_64 host; RISC-V 64 LP64D target, GCC 13.3.0 / musl 1.2.5.
+version = "2024.05-1"
+url = "https://toolchains.bootlin.com/downloads/releases/toolchains/riscv64-lp64d/tarballs/riscv64-lp64d--musl--stable-${version}.tar.xz"
+artifact = "bootlin-riscv64-musl.tar.xz"
+extract = false

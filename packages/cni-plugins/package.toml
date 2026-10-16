@@ -1,7 +1,8 @@
 schema = 1
 name = "cni-plugins"
 backend = "prebuilt"
-source = "cni-plugins"
+version = "v1.9.1-sdsat.1"
+url = "https://github.com/sdsat-org/cni-plugins/releases/download/v1.9.1/cni-plugins-${version}-linux-riscv64.tar.gz"
 artifact = "bridge"
 file = "bridge"
 

@@ -56,7 +56,7 @@ enum Action {
     Doctor,
     /// Install the profile Rust toolchain and helpers declared by the packages.
     Setup,
-    /// Save the active configuration as a new preset, retaining its source lock reference.
+    /// Save the active configuration as a new preset.
     Savedefconfig { name: String },
     /// Remove this configuration's build outputs, retaining its config and the download cache.
     Clean,

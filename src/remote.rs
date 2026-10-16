@@ -249,14 +249,8 @@ fn unpack(archive: &Path, directory: &Path) -> Result<()> {
         let name = name.trim_end_matches('/').to_owned();
         relative(&name)?;
         ensure!(
-            [
-                "images",
-                "state",
-                "manifests",
-                ".config.toml",
-                "resolved.lock.toml"
-            ]
-            .contains(&name.split('/').next().unwrap()),
+            ["images", "state", "manifests", ".config.toml",]
+                .contains(&name.split('/').next().unwrap()),
             "unexpected remote output: {name}"
         );
         for part in name.split('/') {

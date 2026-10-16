@@ -32,13 +32,14 @@ MUSE-Card 使用持久化 SD 系统并自动启动 k3s，见 [openRuyi Zero 指�
 
 组件配方支持 `cargo`（Rust）、`go`（Go）、`kbuild`（Make/Kbuild）和 `prebuilt`（预编译文件）四种后端。
 
-`kbuild` 配方可用 `patches` 列出相对仓库根目录的补丁路径，也可在 `board.toml` 中覆盖该列表。补丁在源码解包后按顺序校验并应用；内容参与构建缓存，修改后会重新构建。本地和 SSH 编译机均支持，使用补丁时编译机需安装 Git。
+每个 `packages/<name>/package.toml` 统一声明 `version` 和 `url`，下载地址可使用 `${version}`。校验值放在同目录的 `checksums.sha256`：主下载名为 `source`，额外下载使用 `[extra_sources.<名称>]` 的名称；额外下载可指定自己的 `version`，省略时继承包版本。预设只选择组件，不再维护独立版本锁。
+
+`kbuild` 配方可用 `patches` 列出相对仓库根目录的补丁路径。补丁在源码解包后按顺序校验并应用；内容参与构建缓存，修改后会重新构建。本地和 SSH 编译机均支持，使用补丁时编译机需安装 Git。Linux 的补丁和统一配置均放在 `packages/linux/`，QEMU 与 K1 共用无显示、无音频的 `defconfig`。
 
 需要将根文件系统安装到 SD 等外部存储时，可在 profile 的 `[rootfs]` 中设置 `kind = "external"` 和 `package`。Forge 保留该组件的产物供板卡部署流程使用，不生成 `initramfs.cpio`；此模式不支持 `rootfs_files`、启动脚本覆写或 `run` / `test-boot`，应通过板卡启动流程验证。
 
 - `configs/`、`boards/`、`profiles/`：系统预设、板卡与软件栈配置。
 - `packages/`：组件配方与补丁。
-- `locks/`：源码版本与校验信息。
 - `src/`、`support/`：构建框架与辅助文件。
 - `justfile`：统一命令入口。
 

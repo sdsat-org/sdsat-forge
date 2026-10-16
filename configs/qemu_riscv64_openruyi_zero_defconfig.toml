@@ -3,4 +3,3 @@ name = "qemu_riscv64_openruyi_zero"
 board = "qemu/virt-riscv64"
 profile = "linux-openruyi-zero"
 packages = ["rustsbi", "u-boot-qemu", "linux", "openruyi-zero", "busybox", "runc-linux", "kubernetes", "cni-plugins"]
-lock = "locks/qemu_riscv64_openruyi_zero.lock.toml"

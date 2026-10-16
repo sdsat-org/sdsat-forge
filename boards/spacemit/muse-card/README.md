@@ -2,7 +2,7 @@
 
 openRuyi Zero 的 SD 卡系统构建与安装见 [openRuyi Zero 指南](OPENRUYI.md)。以下为 Asterinas 方案。
 
-此预设从官方 SDK `7f51f445` 源码编译带 DDR 训练修复的 `FSBL.bin` 和精简 U-Boot，搭配 RustSBI、Asterinas 和 BusyBox，不含 Kubernetes。U-Boot 保留 SD、NOR、串口、USB Fastboot 和看门狗。
+此预设使用官方 SDK 稳定版 `k1-bl-v2.2.11-release`，回移 DDR 训练和 QSPI 修复后编译 `FSBL.bin` 和精简 U-Boot，搭配 RustSBI、Asterinas 和 BusyBox，不含 Kubernetes。U-Boot 保留 SD、NOR、串口、USB Fastboot 和看门狗。
 
 ```sh
 just defconfig spacemit_muse_card_asterinas

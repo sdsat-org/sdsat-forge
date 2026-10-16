@@ -1,13 +1,15 @@
 schema = 1
 name = "spacemit-fsbl"
 backend = "kbuild"
-source = "spacemit-fsbl"
+version = "k1-bl-v2.2.11-release"
+url = "https://codeload.github.com/spacemit-com/uboot-2022.10/tar.gz/refs/tags/${version}"
 toolchain = "bootlin-riscv64-musl"
 artifact = "FSBL.bin"
 build_output = "FSBL.bin"
 # The vendor packaging target uses srctree for both its SPL input and output.
 in_tree = true
 args = ["spl/u-boot-spl.bin", "SOURCE_DATE_EPOCH=0"]
+patches = ["packages/u-boot-spacemit-k1/patches/0002-preserve-k1-sdk-ddr-and-qspi-fixes.patch"]
 
 [kbuild]
 tools = ["gcc", "bison", "flex", "openssl", "python3", "xz"]

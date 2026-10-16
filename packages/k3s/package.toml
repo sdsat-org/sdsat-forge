@@ -1,7 +1,8 @@
 schema = 1
 name = "k3s"
 backend = "prebuilt"
-source = "k3s"
+version = "1.37.1+k3s1-tianzhi.20261016"
+url = "https://github.com/sdsat-org/k3s/releases/download/v${version}/k3s-v1.37.1-k3s1-riscv64-tianzhi.20261016.tar.gz"
 artifact = "k3s"
 file = "k3s"
 inputs = [

@@ -3,7 +3,8 @@ name = "asterinas"
 backend = "cargo"
 
 dependencies = ["linux-vdso"]
-source = "asterinas"
+version = "af0b77c8f11db24ba59b8d2cf29a189281b8e270"
+url = "https://codeload.github.com/asterinas/asterinas/tar.gz/${version}"
 patches = [
     "packages/asterinas/patches/0001-short-vis-path-normalize-windows-paths.patch",
     "packages/asterinas/patches/0002-component-macro-use-manifest-path.patch",

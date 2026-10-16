@@ -1,7 +1,8 @@
 schema = 1
 name = "etcd"
 backend = "prebuilt"
-source = "etcd"
+version = "v3.7.2-sdsat.1"
+url = "https://github.com/sdsat-org/etcd/releases/download/${version}/etcd-${version}-linux-riscv64.tar.gz"
 artifact = "etcd"
 file = "etcd"
 

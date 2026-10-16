@@ -1,4 +1,4 @@
-//! Pinned HTTPS downloads and transactional extraction of single-root tar.gz sources.
+//! Package-owned HTTPS downloads and transactional extraction of single-root tar.gz sources.
 //!
 //! Source snapshots omit top-level `.git`, `.agents`, and `.claude` metadata.
 //! Windows materializes archive links as copies; other hosts retain link semantics.
@@ -16,41 +16,141 @@ use std::{
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct SourceLock {
-    pub schema: u32,
-    pub sources: BTreeMap<String, LockedSource>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct LockedSource {
+pub struct Source {
     pub url: String,
     pub sha256: String,
     pub version: String,
 }
 
-pub fn load_lock(path: &Path) -> Result<SourceLock> {
-    let lock: SourceLock = toml::from_str(&fs::read_to_string(path)?)
-        .with_context(|| format!("reading source lock {}", path.display()))?;
-    ensure!(
-        lock.schema == 1,
-        "unsupported source lock schema {}",
-        lock.schema
-    );
-    ensure!(!lock.sources.is_empty(), "source lock must not be empty");
-    for (name, source) in &lock.sources {
-        validate(source).with_context(|| format!("invalid source {name}"))?;
-    }
-    Ok(lock)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExtraSource {
+    pub version: Option<String>,
+    pub url: String,
 }
 
-fn validate(source: &LockedSource) -> Result<()> {
+pub fn extra_key(package: &str, alias: &str) -> String {
+    format!("{package}/{alias}")
+}
+
+/// Resolve sources from package recipes; board and preset files cannot select versions.
+pub fn load_packages(
+    root: &Path,
+    recipes: &BTreeMap<String, crate::config::Recipe>,
+) -> Result<BTreeMap<String, Source>> {
+    let mut sources = BTreeMap::new();
+    for recipe in recipes.values() {
+        load_package(root, recipe, &mut sources)?;
+    }
+    for recipe in recipes.values() {
+        if let Some(name) = &recipe.toolchain {
+            crate::config::validate_name(name)?;
+            if !sources.contains_key(name) {
+                let path =
+                    crate::config::input_path(root, &format!("packages/{name}/package.toml"))?;
+                let toolchain: crate::config::Recipe = crate::config::read(&path)?;
+                ensure!(
+                    toolchain.schema == 1 && toolchain.name == *name,
+                    "invalid toolchain package {name}"
+                );
+                load_package(root, &toolchain, &mut sources)?;
+            }
+        }
+    }
+    Ok(sources)
+}
+
+fn load_package(
+    root: &Path,
+    recipe: &crate::config::Recipe,
+    sources: &mut BTreeMap<String, Source>,
+) -> Result<()> {
+    let path =
+        crate::config::input_path(root, &format!("packages/{}/checksums.sha256", recipe.name))?;
+    let mut checksums = BTreeMap::new();
+    for (line, text) in fs::read_to_string(&path)?.lines().enumerate() {
+        let text = text.trim();
+        if text.is_empty() || text.starts_with('#') {
+            continue;
+        }
+        let mut fields = text.split_whitespace();
+        let digest = fields.next().unwrap();
+        let alias = fields
+            .next()
+            .with_context(|| format!("{}:{}: missing source name", path.display(), line + 1))?;
+        crate::config::validate_name(alias)?;
+        ensure!(
+            fields.next().is_none(),
+            "{}:{}: expected SHA256 and source name",
+            path.display(),
+            line + 1
+        );
+        ensure!(
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "{}:{}: invalid SHA256",
+            path.display(),
+            line + 1
+        );
+        ensure!(
+            checksums
+                .insert(alias.to_owned(), digest.to_ascii_lowercase())
+                .is_none(),
+            "duplicate checksum for {alias} in {}",
+            path.display()
+        );
+    }
+    let mut resolve = |alias: &str, version: &str, url: &str| -> Result<Source> {
+        let variables = BTreeMap::from([
+            ("version".to_owned(), version.to_owned()),
+            ("package_version".to_owned(), recipe.version.clone()),
+        ]);
+        let source = Source {
+            url: crate::backend::expand(url, &variables)
+                .with_context(|| format!("expanding source URL for {}/{alias}", recipe.name))?,
+            version: version.to_owned(),
+            sha256: checksums
+                .remove(alias)
+                .with_context(|| format!("missing checksum for {alias} in {}", path.display()))?,
+        };
+        validate(&source).with_context(|| format!("invalid source {}/{alias}", recipe.name))?;
+        Ok(source)
+    };
+    sources.insert(
+        recipe.name.clone(),
+        resolve("source", &recipe.version, &recipe.url)?,
+    );
+    for (alias, extra) in &recipe.extra_sources {
+        crate::config::validate_name(alias)?;
+        ensure!(
+            alias != "source",
+            "{}: extra source name 'source' is reserved",
+            recipe.name
+        );
+        sources.insert(
+            extra_key(&recipe.name, alias),
+            resolve(
+                alias,
+                extra.version.as_deref().unwrap_or(&recipe.version),
+                &extra.url,
+            )?,
+        );
+    }
+    ensure!(
+        checksums.is_empty(),
+        "unused checksums in {}: {}",
+        path.display(),
+        checksums.keys().cloned().collect::<Vec<_>>().join(", ")
+    );
+    Ok(())
+}
+
+fn validate(source: &Source) -> Result<()> {
     ensure!(
         source.sha256.len() == 64 && source.sha256.bytes().all(|b| b.is_ascii_hexdigit()),
         "source SHA256 must contain exactly 64 hexadecimal digits"
     );
     ensure!(
-        !source.version.trim().is_empty(),
+        !source.version.trim().is_empty() && !source.version.chars().any(char::is_control),
         "source version must not be empty"
     );
     ensure!(
@@ -61,7 +161,7 @@ fn validate(source: &LockedSource) -> Result<()> {
 }
 
 /// Cached archives are revalidated; failed downloads never become cache entries.
-pub fn fetch(source: &LockedSource, download_dir: &Path) -> Result<PathBuf> {
+pub fn fetch(source: &Source, download_dir: &Path) -> Result<PathBuf> {
     validate(source)?;
     fs::create_dir_all(download_dir)?;
     let expected = source.sha256.to_ascii_lowercase();

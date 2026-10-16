@@ -1,14 +1,18 @@
 schema = 1
 name = "u-boot-spacemit-k1"
 backend = "kbuild"
-source = "spacemit-uboot"
+version = "k1-bl-v2.2.11-release"
+url = "https://codeload.github.com/spacemit-com/uboot-2022.10/tar.gz/refs/tags/${version}"
 config = "boards/spacemit/muse-card/uboot-minimal.defconfig"
 toolchain = "bootlin-riscv64-musl"
 artifact = "u-boot.itb"
 build_output = "u-boot.itb"
 in_tree = true
 args = ["u-boot.itb", "SOURCE_DATE_EPOCH=0"]
-patches = ["packages/u-boot-spacemit-k1/patches/0001-allow-minimal-k1-boot-configuration.patch"]
+patches = [
+    "packages/u-boot-spacemit-k1/patches/0001-allow-minimal-k1-boot-configuration.patch",
+    "packages/u-boot-spacemit-k1/patches/0002-preserve-k1-sdk-ddr-and-qspi-fixes.patch",
+]
 
 [kbuild]
 tools = ["gcc", "bison", "flex", "openssl", "python3", "xz"]

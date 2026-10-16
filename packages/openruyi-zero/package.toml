@@ -1,5 +1,6 @@
 schema = 1
 name = "openruyi-zero"
 backend = "prebuilt"
-source = "openruyi-zero"
+version = "2026.09-sdsat-rva20.1"
+url = "https://github.com/sdsat-org/openRuyi-zero/releases/download/v${version}/openruyi-zero-rva20-headless.cpio.gz"
 artifact = "openruyi-zero.cpio.gz"

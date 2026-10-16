@@ -1,0 +1,169 @@
+Subject: [PATCH] serial: 8250: support the vendor SpacemiT K1 UART binding
+
+Use the shared 8250 driver for both the QEMU ns16550 and K1 UART, avoiding
+conflicting ttyS drivers. K1 uses XScale UUE/RTOIE semantics with a 64-byte
+FIFO and a 32-byte transmit threshold. Keep both gate and functional clocks
+enabled in the vendor order, including suspend and error cleanup.
+
+Preserve the existing pxa_serial earlycon argument and the baud divisor
+established by firmware. The existing DT supplies register shift/width,
+interrupts, reset and serial aliases, so no platform-specific Rust logic or
+second kernel configuration is required.
+
+The upstream K1 DT also uses the 8250 intel,xscale-uart binding:
+https://github.com/torvalds/linux/blob/master/arch/riscv/boot/dts/spacemit/k1.dtsi
+The K1 FIFO/UUE/RTOIE requirements were confirmed upstream:
+https://lists.openwall.net/linux-kernel/2024/07/08/598
+
+---
+diff --git a/drivers/tty/serial/8250/8250_of.c b/drivers/tty/serial/8250/8250_of.c
+index 5132962..a160c46 100644
+--- a/drivers/tty/serial/8250/8250_of.c
++++ b/drivers/tty/serial/8250/8250_of.c
+@@ -20,6 +20,7 @@
+ 
+ struct of_serial_info {
+ 	struct clk *clk;
++	struct clk *gate_clk;
+ 	struct reset_control *rst;
+ 	int type;
+ 	int line;
+@@ -43,6 +44,18 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
+ 	pm_runtime_enable(&ofdev->dev);
+ 	pm_runtime_get_sync(&ofdev->dev);
+ 
++	/* The vendor K1 binding names its bus and functional clocks gate/func. */
++	if (of_device_is_compatible(np, "spacemit,pxa-uart")) {
++		info->gate_clk = devm_clk_get(&ofdev->dev, "gate");
++		if (IS_ERR(info->gate_clk)) {
++			ret = PTR_ERR(info->gate_clk);
++			goto err_pmruntime;
++		}
++		ret = clk_prepare_enable(info->gate_clk);
++		if (ret)
++			goto err_pmruntime;
++	}
++
+ 	if (of_property_read_u32(np, "clock-frequency", &clk)) {
+ 
+ 		/* Get clk rate through clk driver if present */
+@@ -52,12 +65,12 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
+ 			if (ret != -EPROBE_DEFER)
+ 				dev_warn(&ofdev->dev,
+ 					 "failed to get clock: %d\n", ret);
+-			goto err_pmruntime;
++			goto err_gate;
+ 		}
+ 
+ 		ret = clk_prepare_enable(info->clk);
+ 		if (ret < 0)
+-			goto err_pmruntime;
++			goto err_gate;
+ 
+ 		clk = clk_get_rate(info->clk);
+ 	}
+@@ -187,6 +200,8 @@ static int of_platform_serial_setup(struct platform_device *ofdev,
+ 	return 0;
+ err_unprepare:
+ 	clk_disable_unprepare(info->clk);
++err_gate:
++	clk_disable_unprepare(info->gate_clk);
+ err_pmruntime:
+ 	pm_runtime_put_sync(&ofdev->dev);
+ 	pm_runtime_disable(&ofdev->dev);
+@@ -227,6 +242,13 @@ static int of_platform_serial_probe(struct platform_device *ofdev)
+ 	if (port8250.port.fifosize)
+ 		port8250.capabilities = UART_CAP_FIFO;
+ 
++	if (of_device_is_compatible(ofdev->dev.of_node, "spacemit,pxa-uart")) {
++		port8250.port.fifosize = 64;
++		port8250.tx_loadsz = 32;
++		/* A custom FIFO size must not drop the XScale enable bits. */
++		port8250.capabilities = UART_CAP_FIFO | UART_CAP_UUE | UART_CAP_RTOIE;
++	}
++
+ 	/* Check for TX FIFO threshold & set tx_loadsz */
+ 	if ((of_property_read_u32(ofdev->dev.of_node, "tx-threshold",
+ 				  &tx_threshold) == 0) &&
+@@ -254,6 +276,7 @@ err_dispose:
+ 	pm_runtime_put_sync(&ofdev->dev);
+ 	pm_runtime_disable(&ofdev->dev);
+ 	clk_disable_unprepare(info->clk);
++	clk_disable_unprepare(info->gate_clk);
+ err_free:
+ 	kfree(info);
+ 	return ret;
+@@ -272,6 +295,7 @@ static int of_platform_serial_remove(struct platform_device *ofdev)
+ 	pm_runtime_put_sync(&ofdev->dev);
+ 	pm_runtime_disable(&ofdev->dev);
+ 	clk_disable_unprepare(info->clk);
++	clk_disable_unprepare(info->gate_clk);
+ 	kfree(info);
+ 	return 0;
+ }
+@@ -288,6 +312,7 @@ static int of_serial_suspend(struct device *dev)
+ 	if (!uart_console(port) || console_suspend_enabled) {
+ 		pm_runtime_put_sync(dev);
+ 		clk_disable_unprepare(info->clk);
++		clk_disable_unprepare(info->gate_clk);
+ 	}
+ 	return 0;
+ }
+@@ -297,15 +322,26 @@ static int of_serial_resume(struct device *dev)
+ 	struct of_serial_info *info = dev_get_drvdata(dev);
+ 	struct uart_8250_port *port8250 = serial8250_get_port(info->line);
+ 	struct uart_port *port = &port8250->port;
++	int ret;
+ 
+ 	if (!uart_console(port) || console_suspend_enabled) {
+ 		pm_runtime_get_sync(dev);
+-		clk_prepare_enable(info->clk);
++		ret = clk_prepare_enable(info->gate_clk);
++		if (ret)
++			goto err_pm;
++		ret = clk_prepare_enable(info->clk);
++		if (ret) {
++			clk_disable_unprepare(info->gate_clk);
++			goto err_pm;
++		}
+ 	}
+ 
+ 	serial8250_resume_port(info->line);
+ 
+ 	return 0;
++err_pm:
++	pm_runtime_put_sync(dev);
++	return ret;
+ }
+ #endif
+ static SIMPLE_DEV_PM_OPS(of_serial_pm_ops, of_serial_suspend, of_serial_resume);
+@@ -323,6 +359,7 @@ static const struct of_device_id of_platform_serial_table[] = {
+ 	{ .compatible = "nxp,lpc3220-uart", .data = (void *)PORT_LPC3220, },
+ 	{ .compatible = "ralink,rt2880-uart", .data = (void *)PORT_RT2880, },
+ 	{ .compatible = "intel,xscale-uart", .data = (void *)PORT_XSCALE, },
++	{ .compatible = "spacemit,pxa-uart", .data = (void *)PORT_XSCALE, },
+ 	{ .compatible = "altr,16550-FIFO32",
+ 		.data = (void *)PORT_ALTR_16550_F32, },
+ 	{ .compatible = "altr,16550-FIFO64",
+diff --git a/drivers/tty/serial/8250/8250_early.c b/drivers/tty/serial/8250/8250_early.c
+index e3f482f..bb0e35a 100644
+--- a/drivers/tty/serial/8250/8250_early.c
++++ b/drivers/tty/serial/8250/8250_early.c
+@@ -171,6 +171,17 @@ OF_EARLYCON_DECLARE(ns16550a, "ns16550a", early_serial8250_setup);
+ OF_EARLYCON_DECLARE(uart, "nvidia,tegra20-uart", early_serial8250_setup);
+ OF_EARLYCON_DECLARE(uart, "snps,dw-apb-uart", early_serial8250_setup);
+ 
++static int __init early_spacemit8250_setup(struct earlycon_device *device,
++					 const char *options)
++{
++	device->port.regshift = 2;
++	/* Keep the divisor established by firmware, as the vendor earlycon does. */
++	device->baud = 0;
++	return early_serial8250_setup(device, options);
++}
++EARLYCON_DECLARE(pxa_serial, early_spacemit8250_setup);
++OF_EARLYCON_DECLARE(pxa_serial, "spacemit,pxa-uart", early_spacemit8250_setup);
++
+ #ifdef CONFIG_SERIAL_8250_OMAP
+ 
+ static int __init early_omap8250_setup(struct earlycon_device *device,

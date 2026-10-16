@@ -1,16 +1,26 @@
 schema = 1
 name = "runc-linux"
 backend = "prebuilt"
-source = "runc-linux"
+version = "v1.4.2"
+url = "https://github.com/opencontainers/runc/releases/download/${version}/runc.riscv64"
 artifact = "runc"
 extract = false
 inputs = ["packages/runc-linux/NOTICE"]
 
-[extra_sources]
-runc-source = "runc-release-source"
-libseccomp-source = "libseccomp-source"
-runc-license = "runc-license"
-libseccomp-license = "libseccomp-license"
+[extra_sources.runc-source]
+url = "https://github.com/opencontainers/runc/releases/download/${version}/runc.tar.xz"
+
+[extra_sources.libseccomp-source]
+version = "2.6.0"
+url = "https://github.com/opencontainers/runc/releases/download/${package_version}/libseccomp-${version}.tar.gz"
+
+[extra_sources.runc-license]
+version = "v1.4.2 (c241c0bb5e60a8e8c1b2e53d4eca8d0068d8d57e)"
+url = "https://raw.githubusercontent.com/opencontainers/runc/c241c0bb5e60a8e8c1b2e53d4eca8d0068d8d57e/LICENSE"
+
+[extra_sources.libseccomp-license]
+version = "2.6.0"
+url = "https://raw.githubusercontent.com/seccomp/libseccomp/v${version}/LICENSE"
 
 [artifacts]
 "${extra.runc-source}" = "runc-source.tar.xz"

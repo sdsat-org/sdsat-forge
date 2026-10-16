@@ -37,7 +37,6 @@ pub struct Preset {
     pub board: String,
     pub profile: String,
     pub packages: Vec<String>,
-    pub lock: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,7 +119,8 @@ pub struct Recipe {
     pub schema: u32,
     pub name: String,
     pub backend: String,
-    pub source: String,
+    pub version: String,
+    pub url: String,
     pub artifact: String,
     pub build_output: Option<String>,
     pub kbuild: Option<crate::backend::kbuild::KbuildConfig>,
@@ -130,7 +130,7 @@ pub struct Recipe {
     #[serde(default = "default_extract")]
     pub extract: bool,
     #[serde(default)]
-    pub extra_sources: BTreeMap<String, String>,
+    pub extra_sources: BTreeMap<String, crate::source::ExtraSource>,
     /// Additional repository inputs read by the build, included in cache keys.
     #[serde(default)]
     pub inputs: Vec<String>,
@@ -301,7 +301,6 @@ pub fn validate_preset(root: &Path, preset: &Preset) -> Result<()> {
     validate_name(&preset.name)?;
     validate_name(&preset.profile)?;
     input_path(root, &format!("boards/{}/board.toml", preset.board))?;
-    input_path(root, &preset.lock)?;
     for name in &preset.packages {
         validate_name(name)?;
     }

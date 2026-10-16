@@ -6,13 +6,6 @@ config = "boards/spacemit/muse-pi-pro/rustsbi.toml"
 artifact = "rustsbi.bin"
 build_output = "${source}/target/${target}/release/rustsbi-prototyper-dynamic.bin"
 
-[packages.linux]
-config = "boards/spacemit/muse-pi-pro/linux.defconfig"
-args = ["Image", "spacemit/k1-x_MUSE-Pi-Pro.dtb"]
-
-[packages.linux.artifacts]
-"arch/riscv/boot/dts/spacemit/k1-x_MUSE-Pi-Pro.dtb" = "k1-x_MUSE-Pi-Pro.dtb"
-
 [packages.uboot]
 config = "boards/spacemit/muse-pi-pro/uboot.defconfig"
 in_tree = true

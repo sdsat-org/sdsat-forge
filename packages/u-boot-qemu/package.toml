@@ -1,7 +1,8 @@
 schema = 1
 name = "u-boot-qemu"
 backend = "prebuilt"
-source = "u-boot-qemu"
+version = "2025.10 (Alpine 3.23.5)"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/riscv64/alpine-uboot-3.23.5-riscv64.tar.gz"
 artifact = "u-boot.bin"
 extract = false
 inputs = ["packages/u-boot-qemu/NOTICE"]
@@ -9,14 +10,24 @@ inputs = ["packages/u-boot-qemu/NOTICE"]
 [prebuilt]
 member = "u-boot/qemu-riscv64_smode/u-boot.bin"
 
-[extra_sources]
-source = "u-boot-qemu-source"
-license = "u-boot-qemu-license"
-apkbuild = "u-boot-qemu-apkbuild"
-patch = "u-boot-qemu-patch"
+[extra_sources.upstream-source]
+version = "2025.10"
+url = "https://ftp.denx.de/pub/u-boot/u-boot-${version}.tar.bz2"
+
+[extra_sources.license]
+version = "2025.10"
+url = "https://raw.githubusercontent.com/u-boot/u-boot/v${version}/Licenses/gpl-2.0.txt"
+
+[extra_sources.apkbuild]
+version = "2025.10-r5 (3461381db6a2bc956370a58d3c38662e2cc8d1f8)"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/3461381db6a2bc956370a58d3c38662e2cc8d1f8/main/u-boot/APKBUILD"
+
+[extra_sources.patch]
+version = "2025.10-r5 (3461381db6a2bc956370a58d3c38662e2cc8d1f8)"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/3461381db6a2bc956370a58d3c38662e2cc8d1f8/main/u-boot/fix-tools-build.patch"
 
 [artifacts]
-"${extra.source}" = "u-boot-qemu-source.tar.bz2"
+"${extra.upstream-source}" = "u-boot-qemu-source.tar.bz2"
 "${extra.license}" = "LICENSE.u-boot-qemu"
 "${extra.apkbuild}" = "u-boot-qemu.APKBUILD"
 "${extra.patch}" = "u-boot-qemu-fix-tools-build.patch"

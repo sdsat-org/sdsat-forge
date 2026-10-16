@@ -3,4 +3,6 @@
 set -eu
 
 export HOME=/root
+# The headless image has no generated glibc locale data.
+export LANG=C
 exec /init

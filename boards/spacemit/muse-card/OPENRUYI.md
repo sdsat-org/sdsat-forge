@@ -31,7 +31,7 @@ sync
 
 分区遵循[官方 K1 布局](https://github.com/spacemit-com/buildroot-ext/blob/855fba3e9458d69d08f71bad66e42e87979e6885/board/spacemit/k1/partition_universal.json)：`bootfs` 从 4 MiB 开始、大小 256 MiB，保存 `Image`、`k1-x_MUSE-Card.dtb` 和 `env_k1-x.txt`；`rootfs` 从 260 MiB 开始，首次启动自动扩展至卡尾。系统按 PARTUUID 挂载 `/` 和 `/boot`，主机名为 `tianzhi-node`。
 
-内核关闭音频和触摸屏驱动，启用容器所需的 cgroups、namespaces、seccomp、overlayfs、veth、bridge 和 VXLAN。`packages/k3s` 提供 k3s 及离线镜像，开机后在后台自动启动；集群数据持久保存在 SD 卡的 `/var/lib/rancher/k3s`。
+内核与 QEMU 共用 `packages/linux/defconfig`，关闭显示、音频和输入设备驱动，保留相机采集及传感器接口，启用容器所需的 cgroups、namespaces、seccomp、overlayfs、veth、bridge 和 VXLAN。`packages/k3s` 提供 k3s 及离线镜像，开机后在后台自动启动；集群数据持久保存在 SD 卡的 `/var/lib/rancher/k3s`。
 
 没有网线时使用内部网络运行单节点，支持本板 Pod 通信。进入终端后查看状态：
 

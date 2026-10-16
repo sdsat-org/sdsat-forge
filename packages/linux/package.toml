@@ -1,12 +1,25 @@
 schema = 1
 name = "linux"
 backend = "kbuild"
-source = "linux"
+version = "k1-bl-v2.2.11-release"
+url = "https://codeload.github.com/spacemit-com/linux-6.6/tar.gz/refs/tags/${version}"
 config = "packages/linux/defconfig"
 toolchain = "bootlin-riscv64-musl"
 artifact = "Image"
 build_output = "arch/riscv/boot/Image"
-args = ["Image"]
+args = ["Image", "spacemit/k1-x_MUSE-Card.dtb", "spacemit/k1-x_MUSE-Pi-Pro.dtb"]
+patches = [
+    "packages/linux/patches/0001-limit-k1x-qspi-ip-reads-to-rx-fifo.patch",
+    "packages/linux/patches/0002-disable-unconnected-muse-card-touchscreen.patch",
+    "packages/linux/patches/0003-balance-k1x-qspi-probe-runtime-pm.patch",
+    "packages/linux/patches/0004-share-8250-driver-with-k1-uart.patch",
+    "packages/linux/patches/0005-limit-k1-dma32-reservation-to-k1-machines.patch",
+    "packages/linux/patches/0006-keep-husb239-independent-of-audio-codec.patch",
+]
+
+[artifacts]
+"arch/riscv/boot/dts/spacemit/k1-x_MUSE-Card.dtb" = "k1-x_MUSE-Card.dtb"
+"arch/riscv/boot/dts/spacemit/k1-x_MUSE-Pi-Pro.dtb" = "k1-x_MUSE-Pi-Pro.dtb"
 
 [kbuild]
 tools = ["gcc", "xz", "bzip2", "bash", "flex", "bison", "bc", "perl"]

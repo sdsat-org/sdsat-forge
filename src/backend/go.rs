@@ -311,7 +311,7 @@ fn install_go(version: &str) -> Result<PathBuf> {
     );
     let download = tempfile::tempdir()?;
     let archive = source::fetch(
-        &source::LockedSource {
+        &source::Source {
             url: format!("https://go.dev/dl/{}", distribution.filename),
             sha256: distribution.sha256.clone(),
             version: version.into(),

@@ -3,7 +3,8 @@ name = "rustsbi"
 backend = "cargo"
 
 dependencies = []
-source = "rustsbi"
+version = "7a524db192f4962fa14ef60ee4d78d47717e52dd"
+url = "https://codeload.github.com/rustsbi/rustsbi/tar.gz/${version}"
 artifact = "rustsbi.elf"
 
 target = "riscv64gc-unknown-none-elf"

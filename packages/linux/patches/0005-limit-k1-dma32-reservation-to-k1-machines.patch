@@ -1,0 +1,32 @@
+From: SDSAT Forge
+Subject: [PATCH] riscv: apply the K1 DMA32 limit only on K1 machines
+
+The K1 MMIO window occupies physical addresses from 2 GiB to 4 GiB.
+Restricting DMA32 to the first 2 GiB is necessary there, but doing so for
+every kernel built with K1 support leaves QEMU virt without DMA32 memory:
+its RAM starts at 2 GiB.
+
+Check the root compatible in the early flat device tree so one kernel can
+retain the K1 reservation and use the generic DMA32 limit on QEMU.
+
+--- a/arch/riscv/mm/init.c
++++ b/arch/riscv/mm/init.c
+@@ -262,12 +262,13 @@
+ 	max_low_pfn = max_pfn = PFN_DOWN(phys_ram_end);
+ 	high_memory = (void *)(__va(PFN_PHYS(max_low_pfn)));
+ 
+-	#ifdef CONFIG_SOC_SPACEMIT_K1X
+-	/* 2GB~4GB is IO area on spacemit-k1x, will be reserved when early_init_fdt_scan_reserved_mem */
+-	dma32_phys_limit = min(2UL * SZ_1G, (unsigned long)PFN_PHYS(max_low_pfn));
+-	#else
+ 	dma32_phys_limit = min(4UL * SZ_1G, (unsigned long)PFN_PHYS(max_low_pfn));
+-	#endif
++	/* K1 reserves 2 GiB to 4 GiB for MMIO; other platforms may use RAM there. */
++	if (IS_ENABLED(CONFIG_SOC_SPACEMIT_K1X) &&
++	    (of_flat_dt_is_compatible(of_get_flat_dt_root(), "spacemit,k1-x") ||
++	     of_flat_dt_is_compatible(of_get_flat_dt_root(), "spacemit,k1x")))
++		dma32_phys_limit = min(2UL * SZ_1G,
++				      (unsigned long)PFN_PHYS(max_low_pfn));
+ 	set_max_mapnr(max_low_pfn - ARCH_PFN_OFFSET);
+ 
+ 	reserve_initrd_mem();

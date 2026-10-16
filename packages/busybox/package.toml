@@ -1,7 +1,8 @@
 schema = 1
 name = "busybox"
 backend = "kbuild"
-source = "busybox"
+version = "1.38.0"
+url = "https://busybox.net/downloads/busybox-${version}.tar.bz2"
 config = "packages/busybox/defconfig"
 toolchain = "bootlin-riscv64-musl"
 artifact = "busybox.elf"

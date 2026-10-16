@@ -1,7 +1,8 @@
 schema = 1
 name = "uboot"
 backend = "kbuild"
-source = "uboot"
+version = "2026.10"
+url = "https://codeload.github.com/u-boot/u-boot/tar.gz/refs/tags/v${version}"
 config = "boards/qemu/virt-riscv64/uboot.defconfig"
 toolchain = "bootlin-riscv64-musl"
 artifact = "u-boot.bin"
