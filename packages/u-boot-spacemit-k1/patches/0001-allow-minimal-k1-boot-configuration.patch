@@ -1,0 +1,172 @@
+From: SDSAT Forge
+Subject: [PATCH] k1: support a minimal bootloader with explicit SD policies
+
+Allow video, USB keyboard and network support to be disabled. Preserve the
+EEPROM MAC addresses without requiring the network stack. Make SD factory
+flashing, automatic partition growth and the U-Boot FIT source configurable.
+
+The original vendor defaults are retained. The MUSE-Card configuration uses
+a single-board FIT, SD bootfs, and no automatic writes to the SD card.
+
+--- a/board/spacemit/k1-x/Kconfig
++++ b/board/spacemit/k1-x/Kconfig
+@@ -29,6 +29,28 @@
+ 	bool "enable to add memory node to fdt before boot kernel"
+ 	default n
+ 
++config SPACEMIT_UBOOT_FIT_SOURCE
++	string "U-Boot FIT source file"
++	default "board/spacemit/k1-x/configs/uboot_fdt.its"
++	help
++	  Select the FIT source when packaging U-Boot. A board-specific source
++	  can include only the device tree required by that board.
++
++config SPACEMIT_SD_AUTO_FLASH
++	bool "Automatically flash firmware from an SD card"
++	depends on SPACEMIT_FLASH
++	default y
++	help
++	  Search for a vendor firmware provisioning file at boot. Disable this
++	  when an SD card contains a persistent operating system.
++
++config SPACEMIT_SD_PARTITION_RESIZE
++	bool "Resize the last SD partition during boot"
++	default y
++	help
++	  Grow the last SD partition to fill the card during board initialization.
++	  Disable this when storage is provisioned separately.
++
+ config SPACEMIT_BUILD_BIN
+ 	bool "build fsbl.bin for spacemit image"
+ 	default n
+--- a/board/spacemit/k1-x/k1x.c
++++ b/board/spacemit/k1-x/k1x.c
+@@ -993,7 +993,10 @@
+ 	if (NULL == env_get("product_name"))
+ 		env_set("product_name", DEFAULT_PRODUCT_NAME);
+ 
+-	set_env_ethaddr();
++	if (IS_ENABLED(CONFIG_NET))
++		set_env_ethaddr();
++	else
++		read_mac_from_tlv();
+ 	set_dev_serial_no();
+ 	refresh_config_info();
+ 	set_data_buffer_env();
+@@ -1024,7 +1027,8 @@
+ 
+ 	run_fastboot_command();
+ 
+-	run_cardfirmware_flash_command();
++	if (IS_ENABLED(CONFIG_SPACEMIT_SD_AUTO_FLASH))
++		run_cardfirmware_flash_command();
+ 
+ #ifdef CONFIG_ENV_IS_IN_NFS
+ 	run_net_flash_command();
+@@ -1049,7 +1053,8 @@
+ 
+ 	// Resize the last partition for sd
+ 	const char *boot_device = env_get("boot_device");
+-	if (boot_device && strcmp(boot_device, "mmc") == 0) {
++	if (IS_ENABLED(CONFIG_SPACEMIT_SD_PARTITION_RESIZE) &&
++	    boot_device && strcmp(boot_device, "mmc") == 0) {
+ 		const char *boot_devnum = env_get("boot_devnum");
+ 		unsigned long devnum = simple_strtoul(boot_devnum, NULL, 10);
+ 		if (devnum == MMC_DEV_SD) {
+@@ -1363,7 +1368,9 @@
+ 
+ int ft_board_setup(void *blob, struct bd_info *bd)
+ {
++#if CONFIG_IS_ENABLED(FDT_SIMPLEFB)
+ 	struct fdt_memory mem;
++#endif
+ 	static const struct node_info nodes[] = {
+ 		{ "spacemit,k1x-qspi", MTD_DEV_TYPE_NOR, },  /* SPI flash */
+ 	};
+@@ -1373,13 +1380,15 @@
+ 		BOOT_MODE_NOR == get_boot_mode())
+ 		fdt_fixup_mtdparts(blob, nodes, ARRAY_SIZE(nodes));
+ 
+-	if (CONFIG_IS_ENABLED(FDT_SIMPLEFB)) {
++#if CONFIG_IS_ENABLED(FDT_SIMPLEFB)
++	{
+ 		/* reserved with no-map tag the video buffer */
+ 		mem.start = gd->video_bottom;
+ 		mem.end = gd->video_top - 1;
+ 
+ 		fdtdec_add_reserved_memory(blob, "framebuffer", &mem, NULL, 0, NULL, 0);
+ 	}
++#endif
+ 
+ 	ft_board_cpu_fixup(blob, bd);
+ 	ft_board_info_fixup(blob, bd);
+--- a/common/usb_hub.c
++++ b/common/usb_hub.c
+@@ -419,7 +419,8 @@
+ #if CONFIG_IS_ENABLED(K1_X_BOARD_ASIC)
+ 	/* If multiple hub are connected, we only support 2 keyboard for now 
+ 	 * there is no need to scan over those hubs! */
+-	if ((usb_kbd_only && usbkbd_count >= 2) || (usb_kbd_only && speed > USB_SPEED_HIGH)) {
++	if (IS_ENABLED(CONFIG_USB_KEYBOARD) &&
++	    ((usb_kbd_only && usbkbd_count >= 2) || (usb_kbd_only && speed > USB_SPEED_HIGH))) {
+ 		printf("bypass a non-HS udev for quick boot...kbd: %d\n", usbkbd_count);
+ 		return -ENOENT;
+ 	}
+@@ -613,7 +614,7 @@
+ 		if (list_empty(&usb_scan_list))
+ 			goto out;
+ 
+-		if (usb_kbd_only && usbkbd_count >= 2) {
++		if (IS_ENABLED(CONFIG_USB_KEYBOARD) && usb_kbd_only && usbkbd_count >= 2) {
+ 			list_for_each_entry_safe(usb_scan, tmp, &usb_scan_list, list) {
+ 				list_del(&usb_scan->list);
+ 				free(usb_scan);
+--- a/board/spacemit/k1-x/config.mk
++++ b/board/spacemit/k1-x/config.mk
+@@ -34,7 +34,7 @@
+ 	cp $(srctree)/u-boot-nodtb.bin \
+ 		$(srctree)/board/$(CONFIG_SYS_VENDOR)/$(CONFIG_SYS_BOARD)/ && \
+ 	$(srctree)/tools/mkimage -f \
+-		$(srctree)/board/$(CONFIG_SYS_VENDOR)/$(CONFIG_SYS_BOARD)/configs/uboot_fdt.its \
++		$(srctree)/$(CONFIG_SPACEMIT_UBOOT_FIT_SOURCE:"%"=%) \
+ 		-r $(srctree)/$2;\
+ 	rm -rf $(srctree)/board/$(CONFIG_SYS_VENDOR)/$(CONFIG_SYS_BOARD)/dtb && \
+ 	rm -f $(srctree)/board/$(CONFIG_SYS_VENDOR)/$(CONFIG_SYS_BOARD)/u-boot-nodtb.bin
+--- /dev/null
++++ b/board/spacemit/k1-x/configs/uboot_muse_card.its
+@@ -0,0 +1,35 @@
++/dts-v1/;
++
++/ {
++    description = "U-Boot FIT image for MUSE-Card";
++    #address-cells = <2>;
++
++    images {
++        uboot {
++            description = "U-Boot";
++            type = "standalone";
++            os = "U-Boot";
++            arch = "riscv";
++            compression = "none";
++            load = <0x0 0x00200000>;
++            data = /incbin/("../u-boot-nodtb.bin");
++            hash-1 { algo = "crc32"; };
++        };
++        fdt_9 {
++            description = "k1-x_MUSE-Card";
++            type = "flat_dt";
++            compression = "none";
++            data = /incbin/("../dtb/k1-x_MUSE-Card.dtb");
++            hash-1 { algo = "crc32"; };
++        };
++    };
++
++    configurations {
++        default = "conf_9";
++        conf_9 {
++            description = "k1-x_MUSE-Card";
++            loadables = "uboot";
++            fdt = "fdt_9";
++        };
++    };
++};

@@ -1,0 +1,44 @@
+Subject: [PATCH] spi: k1x-qspi: balance the probe runtime PM reference
+
+Probe initializes the hardware and then drops a runtime PM reference it
+never acquired, producing "Runtime PM usage count underflow!" immediately
+after the NOR device is registered. It also calls pm_runtime_set_active()
+after enabling runtime PM, when that helper returns -EAGAIN.
+
+Set the active state before enabling runtime PM and hold a probe reference
+while registering the controller and sysfs attributes. Release it on the
+successful path after marking the device busy; the existing error path
+balances it with pm_runtime_put_noidle().
+
+--- a/drivers/spi/spi-k1x-qspi.c
++++ b/drivers/spi/spi-k1x-qspi.c
+@@ -1568,8 +1568,10 @@
+ 	pm_runtime_use_autosuspend(&pdev->dev);
+ 	pm_runtime_set_autosuspend_delay(&pdev->dev, QSPI_AUTOSUSPEND_TIMEOUT);
+ 	pm_suspend_ignore_children(&pdev->dev, 1);
+-	pm_runtime_enable(&pdev->dev);
+ 	pm_runtime_set_active(&pdev->dev);
++	/* Keep the initialized controller active until probe has finished. */
++	pm_runtime_get_noresume(&pdev->dev);
++	pm_runtime_enable(&pdev->dev);
+ 
+ 	ctlr->dev.of_node = np;
+ 	ctlr->dev.parent = &pdev->dev;
+@@ -1579,8 +1581,6 @@
+ 	if (ret)
+ 		goto err_destroy_mutex;
+ 
+-	pm_runtime_put_autosuspend(&pdev->dev);
+-
+ #ifdef CONFIG_SYSFS
+ 	ret = sysfs_create_group(&(pdev->dev.kobj),
+ 			(const struct attribute_group *)(&qspi_dev_group));
+@@ -1591,6 +1591,8 @@
+ 	}
+ #endif
+ 
++	pm_runtime_mark_last_busy(&pdev->dev);
++	pm_runtime_put_autosuspend(&pdev->dev);
+ 	return 0;
+ 
+ err_destroy_mutex:

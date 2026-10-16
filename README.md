@@ -24,11 +24,17 @@ just run
 
 Linux/openRuyi QEMU 使用 `just defconfig qemu_riscv64_openruyi_zero`，其余命令相同，Kubernetes 同样在开机后手动启动。此预设使用 bridge CNI，验收节点 `Ready`、独立 Pod IP 和 Pod 间 HTTP 通信；尚未配置 Service 代理和集群 DNS。
 
+MUSE-Card 使用持久化 SD 系统并自动启动 k3s，见 [openRuyi Zero 指南](boards/spacemit/muse-card/OPENRUYI.md)。
+
 `just plan` 查看构建顺序，`just help` 查看完整帮助。使用 `just --jobs 8 build` 指定 Rust/Make 编译并行度。
 
 ## 组件与目录
 
 组件配方支持 `cargo`（Rust）、`go`（Go）、`kbuild`（Make/Kbuild）和 `prebuilt`（预编译文件）四种后端。
+
+`kbuild` 配方可用 `patches` 列出相对仓库根目录的补丁路径，也可在 `board.toml` 中覆盖该列表。补丁在源码解包后按顺序校验并应用；内容参与构建缓存，修改后会重新构建。本地和 SSH 编译机均支持，使用补丁时编译机需安装 Git。
+
+需要将根文件系统安装到 SD 等外部存储时，可在 profile 的 `[rootfs]` 中设置 `kind = "external"` 和 `package`。Forge 保留该组件的产物供板卡部署流程使用，不生成 `initramfs.cpio`；此模式不支持 `rootfs_files`、启动脚本覆写或 `run` / `test-boot`，应通过板卡启动流程验证。
 
 - `configs/`、`boards/`、`profiles/`：系统预设、板卡与软件栈配置。
 - `packages/`：组件配方与补丁。

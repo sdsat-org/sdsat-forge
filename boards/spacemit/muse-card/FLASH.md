@@ -27,7 +27,7 @@ fastboot stage rustsbi-usb-muse-card.itb
 fastboot continue
 ```
 
-等待完整 U-Boot 启动并再次枚举为 Fastboot，主机再执行一次 `fastboot continue`，随后在串口倒计时中按 `s`。这里使用新编译的 `FSBL.bin`，不是 `FSBL.vendor.bin`；以上步骤只加载到 RAM。
+等待 U-Boot 启动并再次枚举为 Fastboot，主机再执行一次 `fastboot continue`，随后在串口倒计时中按 `s`。这里使用本项目编译的 `FSBL.bin`；以上步骤只加载到 RAM。
 
 ## 备份 NOR
 

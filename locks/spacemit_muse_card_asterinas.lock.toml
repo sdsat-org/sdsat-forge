@@ -6,15 +6,10 @@ version = "7f51f4453f9811eeaafbdd839b1bf1b0cc27a413"
 url = "https://codeload.github.com/spacemit-com/uboot-2022.10/tar.gz/7f51f4453f9811eeaafbdd839b1bf1b0cc27a413"
 sha256 = "2768de791a51047ce0866a9a5c06cc0af6f027b653df3eda661d836041c164fe"
 
-[sources.u-boot-spacemit-k1]
-version = "Buildroot-K1-v2.2.11-20260820094101"
-url = "https://archive.spacemit.com/image/k1/version/bianbu-linux/v2.2.11/Buildroot-K1-v2.2.11-20260820094101.zip"
-sha256 = "00431a63775e78f8ef11bb38b6aa3b6f40269c258858bb1b2fc84f969b3d6d5a"
-
-[sources.u-boot-spacemit-k1-license]
-version = "k1-bl-v2.2.11-release"
-url = "https://raw.githubusercontent.com/spacemit-com/uboot-2022.10/1fa1ca64e9705a3650bcc7c21f6666949290830f/Licenses/gpl-2.0.txt"
-sha256 = "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+[sources.spacemit-uboot]
+version = "7f51f4453f9811eeaafbdd839b1bf1b0cc27a413"
+url = "https://codeload.github.com/spacemit-com/uboot-2022.10/tar.gz/7f51f4453f9811eeaafbdd839b1bf1b0cc27a413"
+sha256 = "2768de791a51047ce0866a9a5c06cc0af6f027b653df3eda661d836041c164fe"
 
 [sources.rustsbi]
 version = "7a524db192f4962fa14ef60ee4d78d47717e52dd"

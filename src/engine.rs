@@ -128,6 +128,11 @@ impl Build {
             &format!("profiles/{}/profile.toml", preset.profile),
         )?)?;
         ensure!(profile.schema == 1, "unsupported profile schema");
+        ensure!(
+            profile.rootfs.uses_initramfs()
+                || (board.rootfs_files.is_empty() && profile.rootfs_files.is_empty()),
+            "external rootfs does not support board or profile rootfs_files; deploy additional files to the target storage separately"
+        );
         let sources = source::load_lock(&config::input_path(&root, &preset.lock)?)?;
         let recipes = config::recipes(&root, &preset, &board)?;
         let mut rootfs_paths = BTreeSet::new();
@@ -188,11 +193,6 @@ impl Build {
                     "{} needs a config and toolchain source",
                     recipe.name
                 );
-                ensure!(
-                    recipe.patches.is_empty(),
-                    "{} archive builds do not support patches",
-                    recipe.name
-                );
             }
         }
         for name in [
@@ -230,6 +230,7 @@ impl Build {
                     config::input_path(&root, path)?;
                 }
             }
+            Rootfs::External { .. } => (),
         }
         let build = Self {
             root,
@@ -376,7 +377,12 @@ impl Build {
                 std::iter::once(recipe.artifact.as_str())
                     .chain(recipe.artifacts.values().map(String::as_str))
             })
-            .chain(["initramfs.cpio"])
+            .chain(
+                self.profile
+                    .rootfs
+                    .uses_initramfs()
+                    .then_some("initramfs.cpio"),
+            )
             .collect()
     }
 
@@ -571,6 +577,10 @@ impl Build {
                 println!("[cached] {name}");
                 continue;
             }
+            // A failed rebuild must not retain an earlier successful cache entry.
+            if state_path.exists() {
+                fs::remove_file(&state_path)?;
+            }
             let work = self.output.join(format!("build/{name}-work"));
             safe_directory(&self.root, &work)?;
             let variables = self.build_variables(recipe, &source, &work)?;
@@ -583,6 +593,7 @@ impl Build {
                         &self.root.join("dl"),
                     )?,
                     &config::input_path(&self.root, recipe.config.as_deref().unwrap())?,
+                    &self.patch_paths(&name)?,
                     &work,
                 )?,
                 "cargo" => crate::backend::cargo::build(recipe, &variables)?,
@@ -627,7 +638,7 @@ impl Build {
             publish(&state_path, &serde_json::to_vec(&state)?)?;
         }
         if package.is_none() {
-            self.initramfs()?;
+            self.prepare_rootfs()?;
             let artifacts = self
                 .system_artifacts()
                 .iter()
@@ -740,6 +751,9 @@ impl Build {
             toml::to_string_pretty(&self.preset)?.as_bytes(),
         )?;
         if complete {
+            if !self.profile.rootfs.uses_initramfs() {
+                self.prepare_rootfs()?;
+            }
             publish(
                 &self.output.join("resolved.lock.toml"),
                 toml::to_string_pretty(&self.sources)?.as_bytes(),
@@ -796,7 +810,7 @@ impl Build {
         Ok(variables)
     }
 
-    fn initramfs(&self) -> Result<()> {
+    fn prepare_rootfs(&self) -> Result<()> {
         let output = self.output.join("images/initramfs.cpio");
         let files = self
             .board
@@ -837,6 +851,12 @@ impl Build {
                 image::append_scripts(&output, &scripts)?;
                 image::append_files(&output, &files, *gzip_overlay)
             }
+            Rootfs::External { .. } => match fs::remove_file(&output) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error)
+                    .with_context(|| format!("removing obsolete initramfs {}", output.display())),
+            },
         }
     }
 
@@ -860,6 +880,7 @@ impl Build {
                     data.extend(fs::read(config::input_path(&self.root, path)?)?);
                 }
             }
+            Rootfs::External { .. } => (),
         }
         data.extend_from_slice(include_bytes!("image.rs"));
         data.extend_from_slice(include_bytes!("remote.rs"));
@@ -890,6 +911,7 @@ impl Build {
     }
 
     pub fn test_boot(&self, timeout: Duration, qemu: Option<&str>) -> Result<()> {
+        self.require_qemu_rootfs()?;
         ensure!(
             self.board.qemu.is_some(),
             "test-boot requires a QEMU board; hardware boot must be verified through its serial console"
@@ -900,6 +922,7 @@ impl Build {
     }
 
     fn run_inner(&self, timeout: Option<Duration>, qemu: Option<&str>) -> Result<()> {
+        self.require_qemu_rootfs()?;
         let q = self.board.qemu.as_ref().context(
             "this board boots on hardware; write its SD image to a card instead of running QEMU",
         )?;
@@ -951,6 +974,14 @@ impl Build {
             &self.output.join("logs/qemu.log"),
             timeout,
         )
+    }
+
+    fn require_qemu_rootfs(&self) -> Result<()> {
+        ensure!(
+            self.profile.rootfs.uses_initramfs(),
+            "QEMU run/test-boot does not support external root filesystems; deploy the rootfs package to the target storage separately"
+        );
+        Ok(())
     }
 
     pub fn clean(&self) -> Result<()> {

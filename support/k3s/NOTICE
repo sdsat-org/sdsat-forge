@@ -1,0 +1,29 @@
+K3s RISC-V package for the Tianzhi persistent SD rootfs
+
+K3s v1.37.1+k3s1, commit 356c025475bbefaa09cf0d7e48e8e2adbbde57db
+https://github.com/k3s-io/k3s
+Copyright The K3s Authors. Apache License 2.0.
+This is a downstream RISC-V build, not an upstream published K3s binary.
+
+The executable bundles containerd v2.3.4-k3s1, runc v1.4.2, CNI plugins
+v1.9.1-k3s1, flannel CNI v1.9.0-flannel1, and k3s-root v0.15.2.
+It was built with Go 1.26.8, libseccomp 2.6.1, and a RISC-V musl toolchain.
+The build uses upstream scripts/build and scripts/package-cli without source
+patches. See support/k3s/build-riscv64.sh for pinned build inputs. Go module
+versions are recorded in GO_MODULES.txt; third-party license texts are in
+THIRD_PARTY_LICENSES.txt. The k3s-root utilities include GPL/LGPL programs;
+their corresponding sources and build configuration accompany the release.
+
+The offline archive contains:
+- Kubernetes pause 3.10.1, built from the Kubernetes v1.34.1 source.
+- BusyBox 1.38.0, built with Forge's static RISC-V configuration (GPL-2.0).
+- The upstream CoreDNS 1.14.7 linux_riscv64 executable (Apache-2.0).
+The CoreDNS image has a docker.io/rancher/mirrored-coredns-coredns:1.14.7
+compatibility alias for the bundled K3s manifest. This alias identifies the
+locally assembled image, not a Rancher-published RISC-V container image.
+See support/k3s/build-airgap.sh and its source manifest for exact inputs.
+
+The default configuration starts a single node with an embedded SQLite
+datastore. It includes CoreDNS and VXLAN Pod networking. Traefik, ServiceLB,
+metrics-server, local storage provisioning and the Helm controller are disabled.
+The offline fallback interface is intended for this node only.

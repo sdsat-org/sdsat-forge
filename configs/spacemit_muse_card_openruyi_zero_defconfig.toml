@@ -1,0 +1,6 @@
+schema = 1
+name = "spacemit_muse_card_openruyi_zero"
+board = "spacemit/muse-card"
+profile = "linux-openruyi-zero-sd"
+packages = ["spacemit-fsbl", "rustsbi", "u-boot-spacemit-k1", "linux", "openruyi-zero", "k3s"]
+lock = "locks/spacemit_muse_card_openruyi_zero.lock.toml"

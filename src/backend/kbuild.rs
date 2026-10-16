@@ -1,10 +1,11 @@
 use crate::{config::Recipe, engine::digest_file, process};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
 };
 
@@ -166,7 +167,7 @@ pub fn validate(recipe: &Recipe) -> Result<()> {
     Ok(())
 }
 
-fn host_script(kbuild: &KbuildConfig) -> String {
+fn host_script(kbuild: &KbuildConfig, patched: bool) -> String {
     let mut script = String::new();
     for (flag, expected) in [("-s", &kbuild.host_os), ("-m", &kbuild.host_arch)] {
         if let Some(expected) = expected {
@@ -181,6 +182,7 @@ fn host_script(kbuild: &KbuildConfig) -> String {
         .iter()
         .copied()
         .chain(kbuild.tools.iter().map(String::as_str))
+        .chain(patched.then_some("git"))
         .map(shell_quote)
         .collect::<Vec<_>>()
         .join(" ");
@@ -202,7 +204,7 @@ pub fn check_host(recipe: &Recipe) -> Result<()> {
         command
     };
     let result = command
-        .arg(host_script(kbuild))
+        .arg(host_script(kbuild, !recipe.patches.is_empty()))
         .output()
         .with_context(|| format!("checking {} builder\n{}", recipe.name, ssh_builder_hint()))?;
     ensure!(
@@ -225,19 +227,31 @@ pub fn build(
     source: &Path,
     toolchain: &Path,
     config: &Path,
+    patches: &[PathBuf],
     out: &Path,
 ) -> Result<crate::backend::BuildOutput> {
     validate(recipe)?;
+    ensure!(
+        patches.len() == recipe.patches.len(),
+        "{} builder patch inputs do not match the recipe",
+        recipe.name
+    );
     let artifacts = artifacts(recipe)?;
     let destinations = artifacts.values().collect::<BTreeSet<_>>();
     check_host(recipe)?;
     let source_hash = digest_file(source)?;
     let toolchain_hash = digest_file(toolchain)?;
-    let work = crate::config::absolute(out)?.join(format!(
-        "{}-{}",
-        &source_hash[..16],
-        &toolchain_hash[..16]
-    ));
+    let patch_hashes = patches
+        .iter()
+        .map(|patch| digest_file(patch))
+        .collect::<Result<Vec<_>>>()?;
+    let mut work_name = format!("{}-{}", &source_hash[..16], &toolchain_hash[..16]);
+    if !patch_hashes.is_empty() {
+        let patch_key = format!("{:x}", Sha256::digest(patch_hashes.concat()));
+        work_name.push('-');
+        work_name.push_str(&patch_key[..16]);
+    }
+    let work = crate::config::absolute(out)?.join(work_name);
     fs::create_dir_all(&work)?;
     ensure!(
         !fs::symlink_metadata(&work)?.file_type().is_symlink(),
@@ -256,6 +270,11 @@ pub fn build(
             fs::copy(input, destination)?;
         }
         checksums.push((name.to_owned(), hash));
+    }
+    for (index, (patch, hash)) in patches.iter().zip(patch_hashes).enumerate() {
+        let name = format!("patch-{index}.patch");
+        fs::copy(patch, work.join(&name))?;
+        checksums.push((name, hash));
     }
     fs::write(
         work.join("build.config"),
@@ -443,6 +462,22 @@ impl Builder<'_> {
                 &["-xf", archive, "--strip-components=1", "-C", directory],
                 &format!("extract-{directory}"),
             )?;
+        }
+        for index in 0..recipe.patches.len() {
+            for check in [true, false] {
+                // Do not discover the enclosing Forge repository: git apply
+                // otherwise silently skips paths outside this nested source tree.
+                let script = format!(
+                    "cd source && GIT_CEILING_DIRECTORIES={} git apply --verbose {} -- ../patch-{index}.patch",
+                    shell_quote(self.directory),
+                    if check { "--check" } else { "" },
+                );
+                self.run(
+                    "sh",
+                    &["-c", &script],
+                    &format!("patch-{index}-{}", if check { "check" } else { "apply" }),
+                )?;
+            }
         }
         let build_dir = build_directory(recipe.in_tree);
         self.kbuild(recipe, jobs)?;

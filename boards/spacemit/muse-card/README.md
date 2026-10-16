@@ -1,6 +1,8 @@
 # MUSE-Card
 
-此预设从官方 SDK `7f51f445` 源码编译带 DDR 训练修复的 `FSBL.bin`，U-Boot 使用官方预编译版本，搭配 RustSBI、Asterinas 和 BusyBox，不含 Kubernetes。归档中的旧 FSBL 另存为 `FSBL.vendor.bin`。
+openRuyi Zero 的 SD 卡系统构建与安装见 [openRuyi Zero 指南](OPENRUYI.md)。以下为 Asterinas 方案。
+
+此预设从官方 SDK `7f51f445` 源码编译带 DDR 训练修复的 `FSBL.bin` 和精简 U-Boot，搭配 RustSBI、Asterinas 和 BusyBox，不含 Kubernetes。U-Boot 保留 SD、NOR、串口、USB Fastboot 和看门狗。
 
 ```sh
 just defconfig spacemit_muse_card_asterinas
@@ -11,7 +13,7 @@ sh support/spacemit/pack.sh output/spacemit_muse_card_asterinas/images
 
 打包脚本在 Linux 上运行，需要 `u-boot-tools`、`device-tree-compiler` 和 `binutils-riscv64-linux-gnu`。Windows 构建后，将仓库脚本、模板、profile 和 images 目录同步到编译机再打包。可用 `OBJCOPY`、`READELF` 指定工具，`BOOTARGS` 覆盖 minimal profile 的启动参数。
 
-脚本生成 RustSBI 固件 `fw_dynamic.itb`、`u-boot-muse-card.itb`、USB 恢复用 `rustsbi-usb-muse-card.itb` 和压缩内核的 `asterinas.itb`，不会写入设备。U-Boot FIT 保留官方机器码，只保留 MUSE-Card 配置，并通过设备树补全 CPU 缓存属性和自动启动命令。
+脚本生成 RustSBI 固件 `fw_dynamic.itb`、`u-boot-muse-card.itb`、USB 恢复用 `rustsbi-usb-muse-card.itb` 和压缩内核的 `asterinas.itb`，不会写入设备。U-Boot FIT 使用源码构建的精简程序，并通过设备树补全 CPU 缓存属性和自动启动命令。
 
 首次安装或更新 NOR 中的 FSBL、RustSBI、U-Boot、Asterinas，请按[烧录指南](FLASH.md)操作，包含 USB 恢复、备份、分区写入和回读命令。
 

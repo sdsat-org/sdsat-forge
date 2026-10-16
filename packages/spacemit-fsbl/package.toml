@@ -20,3 +20,5 @@ host_arch = "x86_64"
 
 [artifacts]
 "Licenses/gpl-2.0.txt" = "LICENSE.spacemit-fsbl"
+"bootinfo_spinor.bin" = "bootinfo_spinor-fsbl.bin"
+"bootinfo_sd.bin" = "bootinfo_sd-fsbl.bin"

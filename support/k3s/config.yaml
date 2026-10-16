@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT OR MulanPSL-2.0
+node-name: tianzhi-node
+data-dir: /var/lib/rancher/k3s
+write-kubeconfig-mode: "0600"
+prefer-bundled-bin: true
+pause-image: registry.local/tianzhi/pause:3.10.1-riscv64
+resolv-conf: /run/k3s/resolv.conf
+flannel-backend: vxlan
+kubelet-arg:
+  - cgroup-driver=cgroupfs
+disable:
+  - traefik
+  - metrics-server
+  - servicelb
+  - local-storage
+  - gateway-api-crd
+disable-helm-controller: true

@@ -1,23 +1,23 @@
 schema = 1
 name = "u-boot-spacemit-k1"
-backend = "prebuilt"
-source = "u-boot-spacemit-k1"
+backend = "kbuild"
+source = "spacemit-uboot"
+config = "boards/spacemit/muse-card/uboot-minimal.defconfig"
+toolchain = "bootlin-riscv64-musl"
 artifact = "u-boot.itb"
-extract = false
-inputs = ["packages/u-boot-spacemit-k1/NOTICE"]
+build_output = "u-boot.itb"
+in_tree = true
+args = ["u-boot.itb", "SOURCE_DATE_EPOCH=0"]
+patches = ["packages/u-boot-spacemit-k1/patches/0001-allow-minimal-k1-boot-configuration.patch"]
 
-[prebuilt]
-member = "u-boot.itb"
-
-[prebuilt.artifacts]
-"factory/FSBL.bin" = "FSBL.vendor.bin"
-"factory/bootinfo_spinor.bin" = "bootinfo_spinor.bin"
-"factory/bootinfo_sd.bin" = "bootinfo_sd.bin"
-"env.bin" = "u-boot-env-default.bin"
-
-[extra_sources]
-license = "u-boot-spacemit-k1-license"
+[kbuild]
+tools = ["gcc", "bison", "flex", "openssl", "python3", "xz"]
+config = "olddefconfig"
+arch = "riscv"
+compiler_pattern = "riscv64*-gcc"
+compiler_suffix = "gcc"
+host_os = "Linux"
+host_arch = "x86_64"
 
 [artifacts]
-"${extra.license}" = "LICENSE.u-boot-spacemit-k1"
-"${root}/packages/u-boot-spacemit-k1/NOTICE" = "NOTICE.u-boot-spacemit-k1"
+"Licenses/gpl-2.0.txt" = "LICENSE.u-boot-spacemit-k1"

@@ -58,6 +58,7 @@ pub struct PackageOverride {
     pub config: Option<String>,
     pub artifact: Option<String>,
     pub args: Option<Vec<String>>,
+    pub patches: Option<Vec<String>>,
     pub artifacts: Option<BTreeMap<String, String>>,
     pub in_tree: Option<bool>,
     pub target: Option<String>,
@@ -195,13 +196,23 @@ pub enum Rootfs {
         #[serde(default)]
         gzip_overlay: bool,
     },
+    /// Export the root filesystem package for deployment outside Forge.
+    External {
+        package: String,
+    },
 }
 
 impl Rootfs {
     pub fn package(&self) -> &str {
         match self {
-            Self::Busybox { package, .. } | Self::Prebuilt { package, .. } => package,
+            Self::Busybox { package, .. }
+            | Self::Prebuilt { package, .. }
+            | Self::External { package } => package,
         }
+    }
+
+    pub fn uses_initramfs(&self) -> bool {
+        !matches!(self, Self::External { .. })
     }
 }
 
@@ -318,6 +329,9 @@ pub fn recipes(root: &Path, preset: &Preset, board: &Board) -> Result<BTreeMap<S
             if let Some(args) = &package.args {
                 recipe.args.clone_from(args);
             }
+            if let Some(patches) = &package.patches {
+                recipe.patches.clone_from(patches);
+            }
             if let Some(artifacts) = &package.artifacts {
                 recipe.artifacts.clone_from(artifacts);
             }
@@ -412,11 +426,9 @@ pub fn recipes(root: &Path, preset: &Preset, board: &Board) -> Result<BTreeMap<S
             );
         }
         ensure!(
-            (recipe.extract
-                && !archive_builder
-                && (recipe.backend != "prebuilt" || recipe.file.is_some()))
+            (recipe.extract && (recipe.backend != "prebuilt" || recipe.file.is_some()))
                 || recipe.patches.is_empty(),
-            "{name}: patches require native source extraction"
+            "{name}: patches require source extraction"
         );
         validate_filename(&recipe.artifact)?;
         if let Some(file) = &recipe.file {

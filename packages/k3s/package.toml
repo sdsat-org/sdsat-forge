@@ -1,0 +1,21 @@
+schema = 1
+name = "k3s"
+backend = "prebuilt"
+source = "k3s"
+artifact = "k3s"
+file = "k3s"
+inputs = [
+    "support/k3s/start.sh",
+    "support/k3s/check.sh",
+    "support/k3s/config.yaml",
+    "support/k3s/NOTICE",
+]
+
+[artifacts]
+"${root}/support/k3s/start.sh" = "k3s-start.sh"
+"${root}/support/k3s/check.sh" = "k3s-check.sh"
+"${root}/support/k3s/config.yaml" = "k3s-config.yaml"
+"${source}/k3s-airgap-images-riscv64.tar" = "k3s-airgap-images-riscv64.tar"
+"${source}/LICENSE" = "k3s-LICENSE"
+"${root}/support/k3s/NOTICE" = "NOTICE.k3s"
+"${source}/THIRD_PARTY_LICENSES.txt" = "THIRD_PARTY_LICENSES.k3s.txt"

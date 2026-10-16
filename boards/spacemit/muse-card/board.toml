@@ -4,6 +4,18 @@ arch = "riscv64"
 [packages.spacemit-fsbl]
 config = "boards/spacemit/muse-card/fsbl_defconfig"
 
+[packages.linux]
+config = "boards/spacemit/muse-card/linux.defconfig"
+args = ["Image", "spacemit/k1-x_MUSE-Card.dtb"]
+patches = [
+    "boards/spacemit/muse-card/patches/linux/0001-limit-k1x-qspi-ip-reads-to-rx-fifo.patch",
+    "boards/spacemit/muse-card/patches/linux/0002-disable-unconnected-muse-card-touchscreen.patch",
+    "boards/spacemit/muse-card/patches/linux/0003-balance-k1x-qspi-probe-runtime-pm.patch",
+]
+
+[packages.linux.artifacts]
+"arch/riscv/boot/dts/spacemit/k1-x_MUSE-Card.dtb" = "k1-x_MUSE-Card.dtb"
+
 [packages.rustsbi]
 config = "boards/spacemit/muse-card/rustsbi.toml"
 artifact = "rustsbi.bin"

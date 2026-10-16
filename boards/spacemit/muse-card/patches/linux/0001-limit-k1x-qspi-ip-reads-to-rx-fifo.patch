@@ -1,0 +1,47 @@
+Subject: [PATCH] spi: k1x-qspi: limit IP reads to the RX FIFO size
+
+The AHB path accepts large flash-array reads, but exec_op only selects it
+for its read-from-cache opcode list. Other reads, including SFDP (0x5a),
+still use an IP command and the 128-byte RX FIFO.
+
+When AHB reads are enabled, adjust_op_size currently allows every read to
+use rx_unit_size (4 KiB). The SPI NOR probe caches the complete SFDP table,
+so a table larger than the FIFO overflows it and the driver reads beyond
+the RX data registers.
+
+Use the FIFO limit for commands that cannot use the AHB path. Keep large
+AHB reads and the existing alignment restriction unchanged. This fixes
+the oversized transaction instead of masking its interrupt or disabling
+the NOR controller.
+
+---
+ drivers/spi/spi-k1x-qspi.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/spi/spi-k1x-qspi.c b/drivers/spi/spi-k1x-qspi.c
+--- a/drivers/spi/spi-k1x-qspi.c
++++ b/drivers/spi/spi-k1x-qspi.c
+@@ -1317,14 +1317,21 @@ static int k1x_qspi_adjust_op_size(struct spi_mem *mem, struct spi_mem_op *op)
+ 	struct k1x_qspi *qspi = spi_controller_get_devdata(mem->spi->master);
++	u32 rx_unit_size;
+ 
+ 	mutex_lock(&qspi->lock);
+ 	if (op->data.dir == SPI_MEM_DATA_OUT) {
+ 		if (op->data.nbytes > qspi->tx_unit_size)
+ 			op->data.nbytes = qspi->tx_unit_size;
+ 	} else {
+-		if (op->data.nbytes > qspi->rx_unit_size) {
+-			op->data.nbytes = qspi->rx_unit_size;
++		/* Only the opcodes selected by exec_op can bypass the RX FIFO. */
++		rx_unit_size = qspi->rx_buf_size;
++		if (qspi->ahb_read_enable &&
++		    is_read_from_cache_opcode(op->cmd.opcode))
++			rx_unit_size = qspi->rx_unit_size;
++
++		if (op->data.nbytes > rx_unit_size) {
++			op->data.nbytes = rx_unit_size;
+ 		} else if (op->data.nbytes > qspi->rx_buf_size - 4 && !IS_ALIGNED(op->data.nbytes, 4)) {
+ 			op->data.nbytes = qspi->rx_buf_size - 4;
+ 		}
+ 	}
+ 	mutex_unlock(&qspi->lock);

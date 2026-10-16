@@ -1,0 +1,14 @@
+schema = 1
+toolchain = "nightly-2026-07-21"
+firmware = "rustsbi"
+bootloader = "u-boot-spacemit-k1"
+kernel = "linux"
+
+[rootfs]
+kind = "external"
+package = "openruyi-zero"
+
+[boot]
+# The SD image packer adds the rootfs PARTUUID.
+append = "console=ttyS0,115200n8 earlycon=pxa_serial,mmio32,0xd4017000,115200n8 rootwait rootfstype=ext4 rw loglevel=4 clk_ignore_unused swiotlb=65536"
+test_append = ""

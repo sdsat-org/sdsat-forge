@@ -1,0 +1,11 @@
+# Mount pseudo filesystems before resolving the SD partition UUIDs.
+proc /proc proc defaults 0 0
+sysfs /sys sysfs defaults 0 0
+devtmpfs /dev devtmpfs mode=0755 0 0
+devpts /dev/pts devpts X-mount.mkdir,mode=0620,ptmxmode=0666 0 0
+tmpfs /run tmpfs mode=0755,nosuid,nodev 0 0
+tmpfs /tmp tmpfs mode=1777,nosuid,nodev 0 0
+cgroup2 /sys/fs/cgroup cgroup2 X-mount.mkdir 0 0
+# The kernel already mounted /. Keep its UUID for safe first-boot expansion.
+PARTUUID=@ROOT_PARTUUID@ / ext4 defaults,noatime,noauto 0 1
+PARTUUID=@BOOT_PARTUUID@ /boot vfat defaults,iocharset=cp437,utf8 0 2

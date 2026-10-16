@@ -1,0 +1,23 @@
+From: SDSAT Forge
+Subject: [PATCH] riscv: dts: spacemit: disable the optional MUSE-Card touchscreen
+
+The headless MUSE-Card preset has no GT9xx touchscreen attached. The vendor
+device tree enables it unconditionally, causing three failed I2C probes at
+address 0x5d during boot.
+
+Disable only this optional device. Keep I2C5, the touchscreen driver and the
+camera configuration available; set the node back to okay when fitting a
+compatible touch panel.
+
+--- a/arch/riscv/boot/dts/spacemit/k1-x_MUSE-Card.dts
++++ b/arch/riscv/boot/dts/spacemit/k1-x_MUSE-Card.dts
+@@ -279,7 +279,8 @@
+ 		touchscreen-max-p = <512>;
+ 
+ 		goodix,int-sync = <1>;
+-		status = "okay";
++		/* Enable this node when the optional touch panel is attached. */
++		status = "disabled";
+ 	};
+ };
+ 
